@@ -1,0 +1,6 @@
+{
+  "name": "Lyneck Music Player",
+  "description": "Modern offline music player for Android with local MediaStore scanner, background playback with notification controls, playlists, favorites, and Material 3 design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
