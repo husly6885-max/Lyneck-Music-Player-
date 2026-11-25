@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shuffle_all"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_play"
+        android:shortcutShortLabel="@string/shortcut_shuffle_short"
+        android:shortcutLongLabel="@string/shortcut_shuffle_long">
+        <intent
+            android:action="com.example.ACTION_SHUFFLE_ALL"
+            android:targetPackage="com.aistudio.musicplayer.lyneck"
+            android:targetClass="com.example.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="open_favorites"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_music_note"
+        android:shortcutShortLabel="@string/shortcut_favorites_short"
+        android:shortcutLongLabel="@string/shortcut_favorites_long">
+        <intent
+            android:action="com.example.ACTION_OPEN_FAVORITES"
+            android:targetPackage="com.aistudio.musicplayer.lyneck"
+            android:targetClass="com.example.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="open_search"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_music_note"
+        android:shortcutShortLabel="@string/shortcut_search_short"
+        android:shortcutLongLabel="@string/shortcut_search_long">
+        <intent
+            android:action="com.example.ACTION_OPEN_SEARCH"
+            android:targetPackage="com.aistudio.musicplayer.lyneck"
+            android:targetClass="com.example.MainActivity" />
+    </shortcut>
+</shortcuts>

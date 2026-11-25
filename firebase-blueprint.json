@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile for cloud sync",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp. Must be FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last updated timestamp. Must be FieldValue.serverTimestamp()." }
+      },
+      "required": ["displayName", "email", "createdAt", "updatedAt"]
+    },
+    "CloudPlaylist": {
+      "title": "CloudPlaylist",
+      "description": "User backed up playlist synchronized across devices",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "songCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp. Must be FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last updated timestamp. Must be FieldValue.serverTimestamp()." }
+      },
+      "required": ["name", "createdAt", "updatedAt"]
+    },
+    "CloudFavorite": {
+      "title": "CloudFavorite",
+      "description": "User's favorite song entry for cloud backup",
+      "type": "object",
+      "properties": {
+        "songTitle": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "duration": { "type": "integer" },
+        "addedAt": { "type": "string", "format": "date-time", "description": "Added timestamp. Must be FieldValue.serverTimestamp()." }
+      },
+      "required": ["songTitle", "artist", "addedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Root user profile document"
+    },
+    "/users/{userId}/cloud_playlists/{playlistId}": {
+      "schema": "CloudPlaylist",
+      "description": "User playlists synced to cloud"
+    },
+    "/users/{userId}/cloud_favorites/{favoriteId}": {
+      "schema": "CloudFavorite",
+      "description": "User favorites synced to cloud"
+    }
+  }
+}

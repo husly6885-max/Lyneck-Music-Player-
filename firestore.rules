@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['displayName', 'email', 'createdAt', 'updatedAt']) &&
+             data.displayName is string &&
+             data.email is string &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCloudPlaylist(data) {
+      return data.keys().hasAll(['name', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCloudFavorite(data) {
+      return data.keys().hasAll(['songTitle', 'artist', 'addedAt']) &&
+             data.songTitle is string && data.songTitle.size() > 0 &&
+             data.artist is string &&
+             isValidTimestamp(data.addedAt);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow delete: if isOwner(userId);
+
+      match /cloud_playlists/{playlistId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidCloudPlaylist(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /cloud_favorites/{favoriteId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidCloudFavorite(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

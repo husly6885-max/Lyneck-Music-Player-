@@ -1,27 +1,26 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -32,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -59,66 +59,64 @@ fun MiniPlayer(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onExpandClick)
             .testTag("mini_player_bar"),
-        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp
+        tonalElevation = 4.dp
     ) {
         Column {
-            // Track progress bar
+            // Thin playback progress bar across top edge matching screenshot
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                    .height(2.5.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f)
             )
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Album artwork thumbnail
+                // Circular music/album art thumbnail matching screenshot
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface),
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = song.albumArtUri,
-                        contentDescription = song.album,
-                        modifier = Modifier.size(44.dp),
-                        contentScale = ContentScale.Crop,
-                        error = null,
-                        fallback = null
-                    )
                     Icon(
                         imageVector = Icons.Rounded.MusicNote,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp)
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    AsyncImage(
+                        model = song.albumArtUri,
+                        contentDescription = song.album,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop,
+                        error = null,
+                        fallback = null
                     )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Track details
+                // Track title & artist
                 Column(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
                         text = song.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -132,34 +130,50 @@ fun MiniPlayer(
                     )
                 }
 
-                // Play / Pause button
-                IconButton(
-                    onClick = onPlayPauseClick,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .testTag("mini_play_pause_button")
-                ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
+                Spacer(modifier = Modifier.width(8.dp))
 
-                // Next button
-                IconButton(
-                    onClick = onNextClick,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .testTag("mini_next_button")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = "Next",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(26.dp)
-                    )
+                    // Solid circular Play / Pause button matching screenshot
+                    Surface(
+                        onClick = onPlayPauseClick,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .size(42.dp)
+                            .testTag("mini_play_pause_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                                tint = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    // Outlined circular Next button matching screenshot
+                    IconButton(
+                        onClick = onNextClick,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .border(
+                                BorderStroke(1.2.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)),
+                                CircleShape
+                            )
+                            .testTag("mini_next_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "Next",
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
         }
