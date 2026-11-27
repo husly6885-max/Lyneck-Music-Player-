@@ -14,26 +14,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
@@ -156,406 +159,242 @@ fun NowPlayingScreen(
     val sliderValue = (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
 
     val playerPrimaryColor = Color.White
-    val playerSecondaryColor = Color(0xFFD0E2F2)
+    val playerSecondaryColor = Color(0xFFD6E6F5)
     val accentPrimary = MaterialTheme.colorScheme.primary
     val accentSecondary = MaterialTheme.colorScheme.secondary
-    val chipContainerColor = Color(0xFF071220).copy(alpha = 0.72f)
+    val chipContainerColor = Color(0xFF06101D).copy(alpha = 0.72f)
     val chipBorderColor = Color.White.copy(alpha = 0.22f)
 
     Surface(
         modifier = modifier
             .fillMaxSize()
             .testTag("now_playing_screen"),
-        color = Color(0xFF03070D)
+        color = Color(0xFF02070F)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Custom Zombie Boss full-bleed background cropped proportionally with face anchored cleanly in view
+            // Custom Now Playing background image scaled proportionally without distortion
             AsyncImage(
-                model = R.drawable.zombie_boss_bg,
+                model = R.drawable.lynec_music_background,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alignment = BiasAlignment(0f, -0.35f),
+                alignment = BiasAlignment(0f, -0.25f),
                 modifier = Modifier
                     .fillMaxSize()
-                    .testTag("now_playing_zombie_background")
+                    .testTag("now_playing_custom_background")
             )
 
-            // Subtle top & bottom gradient scrim: keeps zombie face vivid while ensuring all controls & text are readable
+            // Subtle top & bottom gradient scrim so artwork subject stays clear while controls remain high-contrast
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.0f to Color(0xFF02060B).copy(alpha = 0.62f),
-                            0.16f to Color(0xFF02060B).copy(alpha = 0.14f),
-                            0.36f to Color(0xFF02060B).copy(alpha = 0.08f),
-                            0.54f to Color(0xFF02060B).copy(alpha = 0.34f),
-                            0.72f to Color(0xFF02060B).copy(alpha = 0.76f),
-                            1.0f to Color(0xFF02060B).copy(alpha = 0.92f)
+                            0.0f to Color(0xFF02060C).copy(alpha = 0.58f),
+                            0.18f to Color(0xFF02060C).copy(alpha = 0.14f),
+                            0.38f to Color(0xFF02060C).copy(alpha = 0.06f),
+                            0.55f to Color(0xFF02060C).copy(alpha = 0.34f),
+                            0.74f to Color(0xFF02060C).copy(alpha = 0.78f),
+                            1.0f to Color(0xFF02060C).copy(alpha = 0.94f)
                         )
                     )
             )
 
             CompositionLocalProvider(LocalContentColor provides playerPrimaryColor) {
-                Column(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
                         .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
                 ) {
-                    // Top bar: Collapse, Car Mode, Sleep Timer, Queue
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        IconButton(
-                            onClick = onCollapse,
-                            modifier = Modifier.testTag("collapse_now_playing_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.KeyboardArrowDown,
-                                contentDescription = "Collapse",
-                                tint = playerPrimaryColor,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
+                    val isWideLayout = maxWidth >= 620.dp
+                    val isCompactHeight = maxHeight < 540.dp
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = stringResource(R.string.now_playing),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = playerPrimaryColor
+                    if (isWideLayout) {
+                        // Tablet / Foldable / Landscape adaptive two-pane layout
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            NowPlayingTopBar(
+                                sleepTimerState = sleepTimerState,
+                                stopAfterCurrentTrack = playbackState.stopAfterCurrentTrack,
+                                primaryColor = playerPrimaryColor,
+                                accentPrimary = accentPrimary,
+                                onCollapse = onCollapse,
+                                onOpenCarMode = onOpenCarMode,
+                                onOpenSleepTimer = { showSleepTimerDialog = true },
+                                onOpenQueue = { showQueueSheet = true }
                             )
-                            if (sleepTimerState.active) {
-                                Text(
-                                    text = "Sleep ${formatSeconds(sleepTimerState.remainingSeconds)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = accentPrimary
-                                )
-                            } else if (playbackState.stopAfterCurrentTrack) {
-                                Text(
-                                    text = "Stops after track",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                        }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onOpenCarMode) {
-                                Icon(
-                                    imageVector = Icons.Rounded.DirectionsCar,
-                                    contentDescription = "Car Mode",
-                                    tint = playerPrimaryColor
-                                )
-                            }
-                            IconButton(onClick = { showSleepTimerDialog = true }) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Bedtime,
-                                    contentDescription = "Sleep Timer",
-                                    tint = if (sleepTimerState.active) accentPrimary else playerPrimaryColor
-                                )
-                            }
-                            IconButton(
-                                onClick = { showQueueSheet = true },
-                                modifier = Modifier.testTag("open_queue_button")
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                                verticalAlignment = Alignment.Bottom
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                    contentDescription = "Playback Queue",
-                                    tint = playerPrimaryColor
-                                )
-                            }
-                        }
-                    }
-
-                    // Open portrait showcase stage so the zombie boss face stays clearly visible
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.BottomCenter
-                    ) {
-                        when (settings.playerStyle) {
-                            PlayerScreenStyle.VISUALIZER -> VisualizerBarsStrip(bars = visualizerBars)
-                            PlayerScreenStyle.MINIMAL -> MinimalTrackFormatBadge(song = song)
-                            PlayerScreenStyle.CLASSIC, PlayerScreenStyle.VINYL -> Unit
-                        }
-                    }
-
-                    // Track Metadata + Preserved Album Artwork Thumbnail + Quick Action Icons
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            if (settings.playerStyle == PlayerScreenStyle.VINYL) {
-                                CompactVinylArtwork(song = song, isPlaying = playbackState.isPlaying)
-                            } else {
-                                CompactAlbumArtworkCard(song = song)
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = song.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = playerPrimaryColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "${song.artist} • ${song.album}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = playerSecondaryColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.toggleFavorite(song) },
-                                modifier = Modifier.testTag("now_playing_fav_button")
-                            ) {
-                                Icon(
-                                    imageVector = if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                    contentDescription = "Favorite",
-                                    tint = if (song.isFavorite) MaterialTheme.colorScheme.tertiary else playerSecondaryColor,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                        }
-
-                        // Quick feature bar: Lyrics, Bookmarks, Equalizer, Speed, Stop After Track
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AssistChip(
-                                onClick = { onOpenLyrics(song) },
-                                label = { Text("Lyrics", color = playerPrimaryColor) },
-                                leadingIcon = { Icon(Icons.Rounded.Lyrics, null, Modifier.size(16.dp), tint = accentPrimary) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
-                                border = BorderStroke(1.dp, chipBorderColor)
-                            )
-                            AssistChip(
-                                onClick = { showBookmarksSheet = true },
-                                label = { Text("Bookmarks", color = playerPrimaryColor) },
-                                leadingIcon = { Icon(Icons.Rounded.Bookmarks, null, Modifier.size(16.dp), tint = accentPrimary) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
-                                border = BorderStroke(1.dp, chipBorderColor)
-                            )
-                            AssistChip(
-                                onClick = onOpenEqualizer,
-                                label = { Text("EQ", color = playerPrimaryColor) },
-                                leadingIcon = { Icon(Icons.Rounded.Equalizer, null, Modifier.size(16.dp), tint = accentPrimary) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
-                                border = BorderStroke(1.dp, chipBorderColor)
-                            )
-                            Box {
-                                AssistChip(
-                                    onClick = { showSpeedMenu = true },
-                                    label = { Text("${String.format(Locale.US, "%.2gx", playbackState.playbackSpeed)}", color = playerPrimaryColor) },
-                                    colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
-                                    border = BorderStroke(1.dp, chipBorderColor)
-                                )
-                                DropdownMenu(
-                                    expanded = showSpeedMenu,
-                                    onDismissRequest = { showSpeedMenu = false }
+                                // Open background showcase side
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .padding(bottom = 12.dp),
+                                    contentAlignment = Alignment.BottomCenter
                                 ) {
-                                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f).forEach { spd ->
-                                        DropdownMenuItem(
-                                            text = { Text("${spd}x") },
-                                            onClick = {
+                                    when (settings.playerStyle) {
+                                        PlayerScreenStyle.VISUALIZER -> VisualizerBarsStrip(bars = visualizerBars)
+                                        PlayerScreenStyle.MINIMAL -> MinimalTrackFormatBadge(song = song)
+                                        PlayerScreenStyle.CLASSIC, PlayerScreenStyle.VINYL -> Unit
+                                    }
+                                }
+
+                                // Controls panel on right side with dark translucent backdrop
+                                Surface(
+                                    modifier = Modifier
+                                        .widthIn(max = 460.dp)
+                                        .weight(1.1f),
+                                    shape = RoundedCornerShape(24.dp),
+                                    color = Color(0xFF040B14).copy(alpha = 0.72f),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        NowPlayingControlsSection(
+                                            song = song,
+                                            playbackState = playbackState,
+                                            volumeState = volumeState,
+                                            settings = settings,
+                                            sliderValue = sliderValue,
+                                            currentPosition = currentPosition,
+                                            duration = duration,
+                                            showSpeedMenu = showSpeedMenu,
+                                            primaryColor = playerPrimaryColor,
+                                            secondaryColor = playerSecondaryColor,
+                                            accentPrimary = accentPrimary,
+                                            accentSecondary = accentSecondary,
+                                            chipContainerColor = chipContainerColor,
+                                            chipBorderColor = chipBorderColor,
+                                            onSliderChange = { newVal ->
+                                                isDraggingSlider = true
+                                                dragPositionMs = newVal * duration
+                                            },
+                                            onSliderChangeFinished = {
+                                                isDraggingSlider = false
+                                                viewModel.seekTo(dragPositionMs.toLong())
+                                            },
+                                            onToggleFavorite = { viewModel.toggleFavorite(song) },
+                                            onOpenLyrics = { onOpenLyrics(song) },
+                                            onOpenBookmarks = { showBookmarksSheet = true },
+                                            onOpenEqualizer = onOpenEqualizer,
+                                            onToggleSpeedMenu = { showSpeedMenu = it },
+                                            onSelectSpeed = { spd ->
                                                 viewModel.setPlaybackSpeed(spd)
                                                 showSpeedMenu = false
-                                            }
+                                            },
+                                            onToggleStopAfter = { viewModel.toggleStopAfterCurrent() },
+                                            onToggleShuffle = { viewModel.toggleShuffle() },
+                                            onPrevious = { viewModel.playPrevious() },
+                                            onTogglePlayPause = { viewModel.togglePlayPause() },
+                                            onNext = { viewModel.playNext() },
+                                            onToggleRepeat = { viewModel.toggleRepeat() },
+                                            onVolumeChange = { viewModel.setDeviceVolumeRatio(it) }
                                         )
                                     }
                                 }
                             }
-                            AssistChip(
-                                onClick = { viewModel.toggleStopAfterCurrent() },
-                                label = { Text("Stop After", color = playerPrimaryColor) },
-                                leadingIcon = { Icon(Icons.Rounded.StopCircle, null, Modifier.size(16.dp), tint = accentPrimary) },
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = if (playbackState.stopAfterCurrentTrack) {
-                                        accentPrimary.copy(alpha = 0.35f)
-                                    } else chipContainerColor
+                        }
+                    } else {
+                        // Standard Handheld Portrait (or Multi-Window Compact) Layout
+                        Column(
+                            modifier = Modifier
+                                .widthIn(max = 560.dp)
+                                .align(Alignment.Center)
+                                .fillMaxSize()
+                                .then(
+                                    if (isCompactHeight) Modifier.verticalScroll(rememberScrollState())
+                                    else Modifier
                                 ),
-                                border = BorderStroke(1.dp, chipBorderColor)
-                            )
-                        }
-                    }
-
-                    // Progress Slider & Timestamps
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = { newVal ->
-                                isDraggingSlider = true
-                                dragPositionMs = newVal * duration
-                            },
-                            onValueChangeFinished = {
-                                isDraggingSlider = false
-                                viewModel.seekTo(dragPositionMs.toLong())
-                            },
-                            colors = SliderDefaults.colors(
-                                thumbColor = accentPrimary,
-                                activeTrackColor = accentPrimary,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.28f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("track_progress_slider")
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = if (isCompactHeight) Arrangement.spacedBy(12.dp) else Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = formatTimeMs(currentPosition),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = playerSecondaryColor
+                            NowPlayingTopBar(
+                                sleepTimerState = sleepTimerState,
+                                stopAfterCurrentTrack = playbackState.stopAfterCurrentTrack,
+                                primaryColor = playerPrimaryColor,
+                                accentPrimary = accentPrimary,
+                                onCollapse = onCollapse,
+                                onOpenCarMode = onOpenCarMode,
+                                onOpenSleepTimer = { showSleepTimerDialog = true },
+                                onOpenQueue = { showQueueSheet = true }
                             )
-                            Text(
-                                text = formatTimeMs(duration),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = playerSecondaryColor
-                            )
-                        }
-                    }
 
-                    // Transport Controls
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        IconButton(
-                            onClick = { viewModel.toggleShuffle() },
-                            modifier = Modifier.testTag("shuffle_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Shuffle,
-                                contentDescription = "Shuffle",
-                                tint = if (playbackState.isShuffle) accentPrimary else playerSecondaryColor.copy(alpha = 0.72f)
-                            )
-                        }
+                            // Open upper-center stage so the custom background image remains prominent
+                            if (!isCompactHeight) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.BottomCenter
+                                ) {
+                                    when (settings.playerStyle) {
+                                        PlayerScreenStyle.VISUALIZER -> VisualizerBarsStrip(bars = visualizerBars)
+                                        PlayerScreenStyle.MINIMAL -> MinimalTrackFormatBadge(song = song)
+                                        PlayerScreenStyle.CLASSIC, PlayerScreenStyle.VINYL -> Unit
+                                    }
+                                }
+                            }
 
-                        IconButton(
-                            onClick = { viewModel.playPrevious() },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("prev_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipPrevious,
-                                contentDescription = "Previous Track",
-                                tint = playerPrimaryColor,
-                                modifier = Modifier.size(36.dp)
-                            )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                NowPlayingControlsSection(
+                                    song = song,
+                                    playbackState = playbackState,
+                                    volumeState = volumeState,
+                                    settings = settings,
+                                    sliderValue = sliderValue,
+                                    currentPosition = currentPosition,
+                                    duration = duration,
+                                    showSpeedMenu = showSpeedMenu,
+                                    primaryColor = playerPrimaryColor,
+                                    secondaryColor = playerSecondaryColor,
+                                    accentPrimary = accentPrimary,
+                                    accentSecondary = accentSecondary,
+                                    chipContainerColor = chipContainerColor,
+                                    chipBorderColor = chipBorderColor,
+                                    onSliderChange = { newVal ->
+                                        isDraggingSlider = true
+                                        dragPositionMs = newVal * duration
+                                    },
+                                    onSliderChangeFinished = {
+                                        isDraggingSlider = false
+                                        viewModel.seekTo(dragPositionMs.toLong())
+                                    },
+                                    onToggleFavorite = { viewModel.toggleFavorite(song) },
+                                    onOpenLyrics = { onOpenLyrics(song) },
+                                    onOpenBookmarks = { showBookmarksSheet = true },
+                                    onOpenEqualizer = onOpenEqualizer,
+                                    onToggleSpeedMenu = { showSpeedMenu = it },
+                                    onSelectSpeed = { spd ->
+                                        viewModel.setPlaybackSpeed(spd)
+                                        showSpeedMenu = false
+                                    },
+                                    onToggleStopAfter = { viewModel.toggleStopAfterCurrent() },
+                                    onToggleShuffle = { viewModel.toggleShuffle() },
+                                    onPrevious = { viewModel.playPrevious() },
+                                    onTogglePlayPause = { viewModel.togglePlayPause() },
+                                    onNext = { viewModel.playNext() },
+                                    onToggleRepeat = { viewModel.toggleRepeat() },
+                                    onVolumeChange = { viewModel.setDeviceVolumeRatio(it) }
+                                )
+                            }
                         }
-
-                        FilledIconButton(
-                            onClick = { viewModel.togglePlayPause() },
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = accentPrimary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier
-                                .size(72.dp)
-                                .shadow(14.dp, CircleShape, spotColor = accentPrimary)
-                                .testTag("play_pause_button")
-                        ) {
-                            Icon(
-                                imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                                modifier = Modifier.size(40.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.playNext() },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("next_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = "Next Track",
-                                tint = playerPrimaryColor,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.toggleRepeat() },
-                            modifier = Modifier.testTag("repeat_button")
-                        ) {
-                            val repeatIcon = if (playbackState.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat
-                            val repeatColor = if (playbackState.repeatMode == RepeatMode.OFF) {
-                                playerSecondaryColor.copy(alpha = 0.72f)
-                            } else accentPrimary
-                            Icon(
-                                imageVector = repeatIcon,
-                                contentDescription = "Repeat",
-                                tint = repeatColor
-                            )
-                        }
-                    }
-
-                    // Real Android Device Volume Slider (AudioManager STREAM_MUSIC)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.VolumeDown,
-                            contentDescription = "Volume Down",
-                            tint = playerSecondaryColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Slider(
-                            value = volumeState.ratio,
-                            onValueChange = { viewModel.setDeviceVolumeRatio(it) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 8.dp)
-                                .testTag("volume_slider"),
-                            colors = SliderDefaults.colors(
-                                thumbColor = accentSecondary,
-                                activeTrackColor = accentSecondary,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.24f)
-                            )
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
-                            contentDescription = "Volume Up",
-                            tint = playerSecondaryColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "${volumeState.percentage}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = accentSecondary,
-                            modifier = Modifier.padding(start = 6.dp)
-                        )
                     }
                 }
             }
@@ -730,6 +569,378 @@ fun NowPlayingScreen(
             currentPositionMs = currentPosition,
             viewModel = viewModel,
             onDismiss = { showBookmarksSheet = false }
+        )
+    }
+}
+
+@Composable
+private fun NowPlayingTopBar(
+    sleepTimerState: SleepTimerState,
+    stopAfterCurrentTrack: Boolean,
+    primaryColor: Color,
+    accentPrimary: Color,
+    onCollapse: () -> Unit,
+    onOpenCarMode: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    onOpenQueue: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        IconButton(
+            onClick = onCollapse,
+            modifier = Modifier.testTag("collapse_now_playing_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.KeyboardArrowDown,
+                contentDescription = "Collapse",
+                tint = primaryColor,
+                modifier = Modifier.size(32.dp)
+            )
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = stringResource(R.string.now_playing),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = primaryColor
+            )
+            if (sleepTimerState.active) {
+                Text(
+                    text = "Sleep ${formatSeconds(sleepTimerState.remainingSeconds)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentPrimary
+                )
+            } else if (stopAfterCurrentTrack) {
+                Text(
+                    text = "Stops after track",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onOpenCarMode) {
+                Icon(
+                    imageVector = Icons.Rounded.DirectionsCar,
+                    contentDescription = "Car Mode",
+                    tint = primaryColor
+                )
+            }
+            IconButton(onClick = onOpenSleepTimer) {
+                Icon(
+                    imageVector = Icons.Rounded.Bedtime,
+                    contentDescription = "Sleep Timer",
+                    tint = if (sleepTimerState.active) accentPrimary else primaryColor
+                )
+            }
+            IconButton(
+                onClick = onOpenQueue,
+                modifier = Modifier.testTag("open_queue_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                    contentDescription = "Playback Queue",
+                    tint = primaryColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingControlsSection(
+    song: Song,
+    playbackState: PlaybackState,
+    volumeState: DeviceVolumeState,
+    settings: AppSettings,
+    sliderValue: Float,
+    currentPosition: Long,
+    duration: Long,
+    showSpeedMenu: Boolean,
+    primaryColor: Color,
+    secondaryColor: Color,
+    accentPrimary: Color,
+    accentSecondary: Color,
+    chipContainerColor: Color,
+    chipBorderColor: Color,
+    onSliderChange: (Float) -> Unit,
+    onSliderChangeFinished: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOpenLyrics: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onOpenEqualizer: () -> Unit,
+    onToggleSpeedMenu: (Boolean) -> Unit,
+    onSelectSpeed: (Float) -> Unit,
+    onToggleStopAfter: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onPrevious: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onToggleRepeat: () -> Unit,
+    onVolumeChange: (Float) -> Unit
+) {
+    // Track Metadata + Preserved Album Artwork Thumbnail + Favorite Button
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (settings.playerStyle == PlayerScreenStyle.VINYL) {
+                CompactVinylArtwork(song = song, isPlaying = playbackState.isPlaying)
+            } else {
+                CompactAlbumArtworkCard(song = song)
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = primaryColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${song.artist} • ${song.album}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = secondaryColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.testTag("now_playing_fav_button")
+            ) {
+                Icon(
+                    imageVector = if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = "Favorite",
+                    tint = if (song.isFavorite) MaterialTheme.colorScheme.tertiary else secondaryColor,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
+        // Quick feature bar: Lyrics, Bookmarks, Equalizer, Speed, Stop After Track
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AssistChip(
+                onClick = onOpenLyrics,
+                label = { Text("Lyrics", color = primaryColor) },
+                leadingIcon = { Icon(Icons.Rounded.Lyrics, null, Modifier.size(16.dp), tint = accentPrimary) },
+                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
+                border = BorderStroke(1.dp, chipBorderColor)
+            )
+            AssistChip(
+                onClick = onOpenBookmarks,
+                label = { Text("Bookmarks", color = primaryColor) },
+                leadingIcon = { Icon(Icons.Rounded.Bookmarks, null, Modifier.size(16.dp), tint = accentPrimary) },
+                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
+                border = BorderStroke(1.dp, chipBorderColor)
+            )
+            AssistChip(
+                onClick = onOpenEqualizer,
+                label = { Text("EQ", color = primaryColor) },
+                leadingIcon = { Icon(Icons.Rounded.Equalizer, null, Modifier.size(16.dp), tint = accentPrimary) },
+                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
+                border = BorderStroke(1.dp, chipBorderColor)
+            )
+            Box {
+                AssistChip(
+                    onClick = { onToggleSpeedMenu(true) },
+                    label = { Text("${String.format(Locale.US, "%.2gx", playbackState.playbackSpeed)}", color = primaryColor) },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
+                    border = BorderStroke(1.dp, chipBorderColor)
+                )
+                DropdownMenu(
+                    expanded = showSpeedMenu,
+                    onDismissRequest = { onToggleSpeedMenu(false) }
+                ) {
+                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f).forEach { spd ->
+                        DropdownMenuItem(
+                            text = { Text("${spd}x") },
+                            onClick = { onSelectSpeed(spd) }
+                        )
+                    }
+                }
+            }
+            AssistChip(
+                onClick = onToggleStopAfter,
+                label = { Text("Stop After", color = primaryColor) },
+                leadingIcon = { Icon(Icons.Rounded.StopCircle, null, Modifier.size(16.dp), tint = accentPrimary) },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (playbackState.stopAfterCurrentTrack) {
+                        accentPrimary.copy(alpha = 0.35f)
+                    } else chipContainerColor
+                ),
+                border = BorderStroke(1.dp, chipBorderColor)
+            )
+        }
+    }
+
+    // Progress Slider & Timestamps
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Slider(
+            value = sliderValue,
+            onValueChange = onSliderChange,
+            onValueChangeFinished = onSliderChangeFinished,
+            colors = SliderDefaults.colors(
+                thumbColor = accentPrimary,
+                activeTrackColor = accentPrimary,
+                inactiveTrackColor = Color.White.copy(alpha = 0.28f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("track_progress_slider")
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatTimeMs(currentPosition),
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryColor
+            )
+            Text(
+                text = formatTimeMs(duration),
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryColor
+            )
+        }
+    }
+
+    // Transport Controls
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        IconButton(
+            onClick = onToggleShuffle,
+            modifier = Modifier.testTag("shuffle_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Shuffle,
+                contentDescription = "Shuffle",
+                tint = if (playbackState.isShuffle) accentPrimary else secondaryColor.copy(alpha = 0.72f)
+            )
+        }
+
+        IconButton(
+            onClick = onPrevious,
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("prev_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.SkipPrevious,
+                contentDescription = "Previous Track",
+                tint = primaryColor,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+
+        FilledIconButton(
+            onClick = onTogglePlayPause,
+            shape = CircleShape,
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = accentPrimary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ),
+            modifier = Modifier
+                .size(72.dp)
+                .shadow(14.dp, CircleShape, spotColor = accentPrimary)
+                .testTag("play_pause_button")
+        ) {
+            Icon(
+                imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                modifier = Modifier.size(40.dp)
+            )
+        }
+
+        IconButton(
+            onClick = onNext,
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("next_button")
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.SkipNext,
+                contentDescription = "Next Track",
+                tint = primaryColor,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+
+        IconButton(
+            onClick = onToggleRepeat,
+            modifier = Modifier.testTag("repeat_button")
+        ) {
+            val repeatIcon = if (playbackState.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat
+            val repeatColor = if (playbackState.repeatMode == RepeatMode.OFF) {
+                secondaryColor.copy(alpha = 0.72f)
+            } else accentPrimary
+            Icon(
+                imageVector = repeatIcon,
+                contentDescription = "Repeat",
+                tint = repeatColor
+            )
+        }
+    }
+
+    // Real Android Device Volume Slider (AudioManager STREAM_MUSIC)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.VolumeDown,
+            contentDescription = "Volume Down",
+            tint = secondaryColor,
+            modifier = Modifier.size(20.dp)
+        )
+        Slider(
+            value = volumeState.ratio,
+            onValueChange = onVolumeChange,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp)
+                .testTag("volume_slider"),
+            colors = SliderDefaults.colors(
+                thumbColor = accentSecondary,
+                activeTrackColor = accentSecondary,
+                inactiveTrackColor = Color.White.copy(alpha = 0.24f)
+            )
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+            contentDescription = "Volume Up",
+            tint = secondaryColor,
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = "${volumeState.percentage}%",
+            style = MaterialTheme.typography.labelSmall,
+            color = accentSecondary,
+            modifier = Modifier.padding(start = 6.dp)
         )
     }
 }
