@@ -308,7 +308,11 @@ fun MainAppContent(viewModel: MusicViewModel) {
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissionsMap ->
-        val audioGranted = permissionsMap[requiredAudioPermission] == true
+        val audioGranted = permissionsMap[requiredAudioPermission] == true ||
+            ContextCompat.checkSelfPermission(
+                context,
+                requiredAudioPermission
+            ) == PackageManager.PERMISSION_GRANTED
         if (audioGranted) {
             viewModel.onPermissionGranted(autoScan = settings.autoScanOnStartup)
         } else {
@@ -321,15 +325,27 @@ fun MainAppContent(viewModel: MusicViewModel) {
             context,
             requiredAudioPermission
         ) == PackageManager.PERMISSION_GRANTED
+        val isNotificationGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
 
         if (isAudioGranted) {
             viewModel.onPermissionGranted(autoScan = settings.autoScanOnStartup)
-        } else {
-            val perms = mutableListOf(requiredAudioPermission)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        }
+
+        if (!isAudioGranted || !isNotificationGranted) {
+            val perms = mutableListOf<String>()
+            if (!isAudioGranted) {
+                perms.add(requiredAudioPermission)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isNotificationGranted) {
                 perms.add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            permissionsLauncher.launch(perms.toTypedArray())
+            if (perms.isNotEmpty()) {
+                permissionsLauncher.launch(perms.toTypedArray())
+            }
         }
     }
 

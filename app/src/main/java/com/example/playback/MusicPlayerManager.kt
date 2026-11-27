@@ -465,27 +465,42 @@ class MusicPlayerManager(
 
     fun togglePlayPause() {
         if (exoPlayer.isPlaying) {
-            if (settingsManager.settings.value.fadeInOut) {
-                fadeOutAndPause()
-            } else {
-                exoPlayer.pause()
-            }
+            pauseFromSession()
         } else {
-            if (exoPlayer.playbackState == Player.STATE_IDLE || exoPlayer.mediaItemCount == 0) {
-                val queue = _playbackState.value.queue
-                if (queue.isNotEmpty()) {
-                    val idx = _playbackState.value.currentIndex.coerceIn(0, queue.lastIndex)
-                    playSongList(queue, idx, _playbackState.value.currentPositionMs, autoPlay = true)
-                }
-            } else {
-                if (settingsManager.settings.value.fadeInOut) {
-                    fadeInAndPlay()
-                } else {
-                    exoPlayer.volume = 1f
-                    exoPlayer.play()
-                }
-            }
+            playFromSession()
         }
+    }
+
+    fun playFromSession() {
+        if (exoPlayer.playbackState == Player.STATE_IDLE || exoPlayer.mediaItemCount == 0) {
+            val queue = _playbackState.value.queue
+            if (queue.isNotEmpty()) {
+                val idx = _playbackState.value.currentIndex.coerceIn(0, queue.lastIndex)
+                playSongList(queue, idx, _playbackState.value.currentPositionMs, autoPlay = true)
+            }
+            return
+        }
+        if (exoPlayer.playbackState == Player.STATE_ENDED) {
+            exoPlayer.seekTo(0L)
+        }
+        if (settingsManager.settings.value.fadeInOut) {
+            fadeInAndPlay()
+        } else {
+            exoPlayer.volume = 1f
+            exoPlayer.play()
+        }
+        _playbackState.value.currentSong?.let { recordTrackPlayedOnce(it.id) }
+    }
+
+    fun pauseFromSession() {
+        fadeJob?.cancel()
+        if (settingsManager.settings.value.fadeInOut && exoPlayer.isPlaying) {
+            fadeOutAndPause()
+        } else {
+            exoPlayer.pause()
+            exoPlayer.volume = 1f
+        }
+        persistCurrentPlaybackPosition()
     }
 
     private fun fadeInAndPlay() {
@@ -756,18 +771,45 @@ class MusicPlayerManager(
         lastSavedPosMs = pos
     }
 
-    private fun songToMediaItem(song: Song): MediaItem {
-        val metadata = MediaMetadata.Builder()
-            .setTitle(song.title)
-            .setArtist(song.artist)
-            .setAlbumTitle(song.album)
-            .setArtworkUri(song.albumArtUri)
+    fun buildMediaMetadata(song: Song): MediaMetadata {
+        val safeTitle = song.title.ifBlank { "Unknown Title" }
+        val safeArtist = song.artist.ifBlank { "Unknown Artist" }
+        val safeAlbum = song.album.ifBlank { "Unknown Album" }
+        val artUri = if (settingsManager.settings.value.showArtworkInNotification) {
+            song.albumArtUri
+        } else {
+            null
+        }
+        return MediaMetadata.Builder()
+            .setTitle(safeTitle)
+            .setDisplayTitle(safeTitle)
+            .setArtist(safeArtist)
+            .setSubtitle(safeArtist)
+            .setAlbumTitle(safeAlbum)
+            .setArtworkUri(artUri)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
             .build()
+    }
 
+    fun buildMediaItem(song: Song): MediaItem = songToMediaItem(song)
+
+    fun refreshSessionMediaItems() {
+        val queue = _playbackState.value.queue
+        if (queue.isEmpty() || exoPlayer.mediaItemCount != queue.size) return
+        val idx = exoPlayer.currentMediaItemIndex.coerceIn(0, queue.lastIndex)
+        val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+        val wasPlaying = exoPlayer.playWhenReady
+        exoPlayer.setMediaItems(queue.map { songToMediaItem(it) }, idx, pos)
+        exoPlayer.playWhenReady = wasPlaying
+    }
+
+    private fun songToMediaItem(song: Song): MediaItem {
         return MediaItem.Builder()
             .setMediaId(song.id.toString())
             .setUri(song.contentUri)
-            .setMediaMetadata(metadata)
+            .setMediaMetadata(buildMediaMetadata(song))
             .build()
     }
 
