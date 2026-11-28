@@ -42,6 +42,7 @@ data class SleepTimerState(
     val active: Boolean = false,
     val remainingSeconds: Int = 0,
     val stopAfterCurrentTrack: Boolean = false,
+    val stopAfterCurrentPlaylist: Boolean = false,
     val fadeOutEnabled: Boolean = true
 )
 
@@ -57,6 +58,7 @@ data class PlaybackState(
     val playbackSpeed: Float = 1.0f,
     val skipSilence: Boolean = false,
     val stopAfterCurrentTrack: Boolean = false,
+    val stopAfterCurrentPlaylist: Boolean = false,
     val activeQueueId: Long = 1L,
     val activeQueueName: String = "Main Queue"
 )
@@ -68,12 +70,14 @@ class MusicPlayerManager(
     private val onTrackPlayed: (songId: Long, listenDeltaMs: Long) -> Unit = { _, _ -> },
     private val onListenTick: (songId: Long, deltaMs: Long) -> Unit = { _, _ -> },
     private val onQueuePersistRequested: (queueId: Long, songIds: List<Long>, index: Int, posMs: Long) -> Unit = { _, _, _, _ -> },
+    private val onCursorPersistRequested: (queueId: Long, index: Int, posMs: Long) -> Unit = { _, _, _ -> },
     private val onPlaybackVisualStateChanged: (PlaybackState) -> Unit = {}
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
     private var fadeJob: Job? = null
+    private var crossfadeJob: Job? = null
     private var crossfadeTriggeredForSongId: Long = -1L
 
     val audioProcessor = LyneckAudioProcessor()
@@ -177,6 +181,10 @@ class MusicPlayerManager(
                             settingsManager.update { it.copy(stopAfterCurrentTrack = false) }
                             _playbackState.value = _playbackState.value.copy(stopAfterCurrentTrack = false, isPlaying = false)
                             exoPlayer.pause()
+                        } else if (_sleepTimerState.value.stopAfterCurrentPlaylist || _playbackState.value.stopAfterCurrentPlaylist) {
+                            _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentPlaylist = false)
+                            _playbackState.value = _playbackState.value.copy(stopAfterCurrentPlaylist = false, isPlaying = false)
+                            exoPlayer.pause()
                         } else {
                             handleSongEnded()
                         }
@@ -186,10 +194,16 @@ class MusicPlayerManager(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val previousIndex = _playbackState.value.currentIndex
                 val currentMediaId = mediaItem?.mediaId?.toLongOrNull()
                 val queue = _playbackState.value.queue
                 val index = queue.indexOfFirst { it.id == currentMediaId }
                 val currentSong = if (index >= 0) queue[index] else queue.find { it.id == currentMediaId }
+
+                val wrappedPlaylist = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                    queue.isNotEmpty() &&
+                    previousIndex == queue.lastIndex &&
+                    index == 0
 
                 if (currentSong != null) {
                     audioProcessor.trackReplayGainDb = currentSong.replayGainDb
@@ -198,11 +212,15 @@ class MusicPlayerManager(
                     }
                     crossfadeTriggeredForSongId = -1L
 
-                    // If stopAfterCurrentTrack was armed, cancel pauseAtEndOfMediaItems only if false
                     if (_playbackState.value.stopAfterCurrentTrack && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                         exoPlayer.pause()
                         settingsManager.update { it.copy(stopAfterCurrentTrack = false) }
                         _playbackState.value = _playbackState.value.copy(stopAfterCurrentTrack = false)
+                        _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentTrack = false)
+                    } else if (_playbackState.value.stopAfterCurrentPlaylist && wrappedPlaylist) {
+                        exoPlayer.pause()
+                        _playbackState.value = _playbackState.value.copy(stopAfterCurrentPlaylist = false)
+                        _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentPlaylist = false)
                     }
                 }
 
@@ -221,6 +239,7 @@ class MusicPlayerManager(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                cancelCrossfadeAndRestoreVolume()
                 val title = _playbackState.value.currentSong?.title ?: "Audio track"
                 _errorEvents.tryEmit("Unable to play \"$title\": ${error.errorCodeName}")
                 exoPlayer.pause()
@@ -232,6 +251,9 @@ class MusicPlayerManager(
         exoPlayer.setPlaybackParameters(PlaybackParameters(settings.playbackSpeed.coerceIn(0.5f, 2.0f)))
         exoPlayer.skipSilenceEnabled = settings.skipSilence
         exoPlayer.pauseAtEndOfMediaItems = settings.stopAfterCurrentTrack
+        if (settings.crossfadeSeconds <= 0) {
+            cancelCrossfadeAndRestoreVolume()
+        }
         _playbackState.value = _playbackState.value.copy(
             playbackSpeed = settings.playbackSpeed,
             skipSilence = settings.skipSilence,
@@ -253,6 +275,7 @@ class MusicPlayerManager(
 
     fun playSongList(songs: List<Song>, startIndex: Int = 0, seekPositionMs: Long = 0L, autoPlay: Boolean = true) {
         if (songs.isEmpty()) return
+        cancelCrossfadeAndRestoreVolume()
 
         originalQueue = songs.toList()
         val queueToPlay = if (_playbackState.value.isShuffle) {
@@ -290,7 +313,7 @@ class MusicPlayerManager(
             recordTrackPlayedOnce(targetSong.id)
         }
         onPlaybackVisualStateChanged(_playbackState.value)
-        persistCurrentPlaybackPosition()
+        persistQueueStructure()
     }
 
     fun restoreQueueWithoutAutoPlay(
@@ -339,7 +362,7 @@ class MusicPlayerManager(
         originalQueue = currentQueue.toList()
         val newCurIdx = currentQueue.indexOfFirst { it.id == _playbackState.value.currentSong?.id }.coerceAtLeast(0)
         _playbackState.value = _playbackState.value.copy(queue = currentQueue, currentIndex = newCurIdx)
-        persistCurrentPlaybackPosition()
+        persistQueueStructure()
     }
 
     fun addToQueue(songsToAdd: List<Song>) {
@@ -356,7 +379,7 @@ class MusicPlayerManager(
         exoPlayer.addMediaItems(filtered.map { songToMediaItem(it) })
         originalQueue = currentQueue.toList()
         _playbackState.value = _playbackState.value.copy(queue = currentQueue)
-        persistCurrentPlaybackPosition()
+        persistQueueStructure()
     }
 
     fun removeFromQueue(index: Int) {
@@ -381,7 +404,8 @@ class MusicPlayerManager(
             currentIndex = newIndex,
             currentSong = currentQueue.getOrNull(newIndex)
         )
-        persistCurrentPlaybackPosition()
+        onPlaybackVisualStateChanged(_playbackState.value)
+        persistQueueStructure()
     }
 
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
@@ -397,10 +421,11 @@ class MusicPlayerManager(
             queue = currentQueue,
             currentIndex = newCurrentIndex
         )
-        persistCurrentPlaybackPosition()
+        persistQueueStructure()
     }
 
     fun clearQueue() {
+        cancelCrossfadeAndRestoreVolume()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         originalQueue = emptyList()
@@ -410,10 +435,12 @@ class MusicPlayerManager(
             currentSong = null,
             isPlaying = false,
             currentPositionMs = 0L,
-            durationMs = 0L
+            durationMs = 0L,
+            stopAfterCurrentPlaylist = false
         )
+        _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentPlaylist = false)
         onPlaybackVisualStateChanged(_playbackState.value)
-        persistCurrentPlaybackPosition()
+        persistQueueStructure()
     }
 
     fun removeDeletedSongsFromQueue(deletedIds: Set<Long>) {
@@ -438,6 +465,7 @@ class MusicPlayerManager(
     fun playAtIndex(index: Int) {
         val queue = _playbackState.value.queue
         if (index in queue.indices) {
+            cancelCrossfadeAndRestoreVolume()
             val song = queue[index]
             audioProcessor.trackReplayGainDb = song.replayGainDb
             crossfadeTriggeredForSongId = -1L
@@ -460,6 +488,7 @@ class MusicPlayerManager(
             }
             recordTrackPlayedOnce(song.id)
             onPlaybackVisualStateChanged(_playbackState.value)
+            persistCurrentPlaybackPosition()
         }
     }
 
@@ -493,6 +522,7 @@ class MusicPlayerManager(
     }
 
     fun pauseFromSession() {
+        cancelCrossfadeAndRestoreVolume()
         fadeJob?.cancel()
         if (settingsManager.settings.value.fadeInOut && exoPlayer.isPlaying) {
             fadeOutAndPause()
@@ -529,6 +559,7 @@ class MusicPlayerManager(
     }
 
     fun playNext() {
+        cancelCrossfadeAndRestoreVolume()
         val queue = _playbackState.value.queue
         if (queue.isEmpty()) return
         val currentIndex = _playbackState.value.currentIndex
@@ -542,6 +573,7 @@ class MusicPlayerManager(
     }
 
     fun playPrevious() {
+        cancelCrossfadeAndRestoreVolume()
         val queue = _playbackState.value.queue
         if (queue.isEmpty()) return
 
@@ -563,6 +595,8 @@ class MusicPlayerManager(
     }
 
     fun seekTo(positionMs: Long) {
+        cancelCrossfadeAndRestoreVolume()
+        crossfadeTriggeredForSongId = -1L
         val safePos = positionMs.coerceAtLeast(0L)
         exoPlayer.seekTo(safePos)
         _playbackState.value = _playbackState.value.copy(currentPositionMs = safePos)
@@ -594,6 +628,7 @@ class MusicPlayerManager(
             )
             updatePlayerPlaylist(restoredQueue, restoredIndex)
         }
+        persistQueueStructure()
     }
 
     fun toggleRepeatMode() {
@@ -616,6 +651,12 @@ class MusicPlayerManager(
         exoPlayer.pauseAtEndOfMediaItems = next
         _playbackState.value = _playbackState.value.copy(stopAfterCurrentTrack = next)
         _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentTrack = next)
+    }
+
+    fun toggleStopAfterCurrentPlaylist() {
+        val next = !_playbackState.value.stopAfterCurrentPlaylist
+        _playbackState.value = _playbackState.value.copy(stopAfterCurrentPlaylist = next)
+        _sleepTimerState.value = _sleepTimerState.value.copy(stopAfterCurrentPlaylist = next)
     }
 
     fun startSleepTimer(minutes: Int, fadeOut: Boolean) {
@@ -713,7 +754,12 @@ class MusicPlayerManager(
                     // Crossfade handling when enabled
                     val crossfadeSec = settingsManager.settings.value.crossfadeSeconds
                     val curSong = _playbackState.value.currentSong
-                    if (crossfadeSec > 0 && effectiveDur > (crossfadeSec * 1000L + 1000L) && curSong != null) {
+                    val isStoppingAfterThisTrack = _playbackState.value.stopAfterCurrentTrack ||
+                        (_playbackState.value.stopAfterCurrentPlaylist &&
+                            _playbackState.value.currentIndex == _playbackState.value.queue.lastIndex)
+                    if (crossfadeSec > 0 && !isStoppingAfterThisTrack &&
+                        effectiveDur > (crossfadeSec * 1000L + 1000L) && curSong != null
+                    ) {
                         val remainingMs = effectiveDur - pos
                         val fadeWindowMs = crossfadeSec * 1000L
                         if (remainingMs in 50L..fadeWindowMs && crossfadeTriggeredForSongId != curSong.id) {
@@ -731,22 +777,64 @@ class MusicPlayerManager(
         }
     }
 
-    private fun triggerCrossfadeTransition(fadeWindowMs: Long) {
-        scope.launch {
-            val steps = 10
-            val stepMs = (fadeWindowMs / 2 / steps).coerceAtLeast(40L)
-            for (i in steps downTo 2) {
-                if (!exoPlayer.isPlaying) break
-                exoPlayer.volume = i.toFloat() / steps
-                delay(stepMs)
-            }
-            playNext()
-            for (i in 2..steps) {
-                if (!exoPlayer.isPlaying) break
-                exoPlayer.volume = i.toFloat() / steps
-                delay(stepMs)
-            }
+    private fun cancelCrossfadeAndRestoreVolume() {
+        val activeJob = crossfadeJob
+        crossfadeJob = null
+        if (activeJob != null && activeJob.isActive) {
+            activeJob.cancel()
             exoPlayer.volume = 1f
+        }
+    }
+
+    private fun triggerCrossfadeTransition(fadeWindowMs: Long) {
+        crossfadeJob?.cancel()
+        crossfadeJob = scope.launch {
+            try {
+                val steps = 10
+                val stepMs = (fadeWindowMs / 2 / steps).coerceAtLeast(40L)
+                for (i in steps downTo 2) {
+                    if (!isActive || !exoPlayer.isPlaying) break
+                    exoPlayer.volume = i.toFloat() / steps
+                    delay(stepMs)
+                }
+                if (isActive && exoPlayer.isPlaying) {
+                    val queue = _playbackState.value.queue
+                    val nextIndex = _playbackState.value.currentIndex + 1
+                    val targetIdx = when {
+                        nextIndex < queue.size -> nextIndex
+                        _playbackState.value.repeatMode == RepeatMode.ALL -> 0
+                        else -> -1
+                    }
+                    if (targetIdx >= 0) {
+                        val song = queue[targetIdx]
+                        audioProcessor.trackReplayGainDb = song.replayGainDb
+                        crossfadeTriggeredForSongId = -1L
+                        _playbackState.value = _playbackState.value.copy(
+                            currentIndex = targetIdx,
+                            currentSong = song,
+                            durationMs = song.duration,
+                            currentPositionMs = 0L
+                        )
+                        if (exoPlayer.mediaItemCount > targetIdx) {
+                            exoPlayer.seekTo(targetIdx, 0L)
+                            exoPlayer.play()
+                        } else {
+                            exoPlayer.setMediaItems(queue.map { songToMediaItem(it) }, targetIdx, 0L)
+                            exoPlayer.prepare()
+                            exoPlayer.play()
+                        }
+                        recordTrackPlayedOnce(song.id)
+                        onPlaybackVisualStateChanged(_playbackState.value)
+                    }
+                    for (i in 2..steps) {
+                        if (!isActive || !exoPlayer.isPlaying) break
+                        exoPlayer.volume = i.toFloat() / steps
+                        delay(stepMs)
+                    }
+                }
+            } finally {
+                exoPlayer.volume = 1f
+            }
         }
     }
 
@@ -755,17 +843,30 @@ class MusicPlayerManager(
         progressJob = null
     }
 
+    fun persistQueueStructure() {
+        val state = _playbackState.value
+        val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+        if (state.queue.any { it.id < 0L }) return
+        onQueuePersistRequested(
+            state.activeQueueId,
+            state.queue.map { it.id },
+            state.currentIndex.coerceAtLeast(0),
+            pos
+        )
+        lastSavedPosMs = pos
+    }
+
     fun persistCurrentPlaybackPosition() {
         val state = _playbackState.value
         val curSong = state.currentSong ?: return
+        if (curSong.id < 0L) return
         val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
         if (settingsManager.settings.value.rememberPlaybackPosition) {
             settingsManager.saveLastPlayback(curSong.id, pos)
         }
-        onQueuePersistRequested(
+        onCursorPersistRequested(
             state.activeQueueId,
-            state.queue.map { it.id },
-            state.currentIndex,
+            state.currentIndex.coerceAtLeast(0),
             pos
         )
         lastSavedPosMs = pos
@@ -818,6 +919,7 @@ class MusicPlayerManager(
         stopProgressTracker()
         sleepTimerJob?.cancel()
         fadeJob?.cancel()
+        crossfadeJob?.cancel()
         effectsManager.destroy()
         volumeObserver.destroy()
         exoPlayer.release()

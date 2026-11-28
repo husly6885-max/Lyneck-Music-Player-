@@ -85,9 +85,10 @@ class LyneckMusicWidgetProvider : AppWidgetProvider() {
                     views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_music_note)
                 }
 
-                // Open App intent on root click
+                // Open App intent on root click (opens Now Playing if a track is active)
                 val openIntent = Intent(context, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra(MusicService.EXTRA_OPEN_NOW_PLAYING, !title.isNullOrBlank())
                 }
                 val openPending = PendingIntent.getActivity(
                     context,
@@ -141,9 +142,23 @@ class LyneckMusicWidgetProvider : AppWidgetProvider() {
         }
 
         private fun loadScaledBitmap(context: Context, uri: Uri): Bitmap? {
+            val maxSizePx = 160
             return try {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                    BitmapFactory.decodeStream(stream, null, bounds)
+                }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+                var sample = 1
+                var w = bounds.outWidth
+                var h = bounds.outHeight
+                while (w / 2 >= maxSizePx && h / 2 >= maxSizePx) {
+                    w /= 2
+                    h /= 2
+                    sample *= 2
+                }
+                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
                     BitmapFactory.decodeStream(stream, null, opts)
                 }
             } catch (_: Exception) {

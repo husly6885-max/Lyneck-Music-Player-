@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -61,6 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.Playlist
 import com.example.data.model.Song
 import com.example.data.storage.FileOpResult
+import com.example.service.MusicService
 import com.example.ui.LibraryTab
 import com.example.ui.MusicViewModel
 import com.example.ui.NavigationScreen
@@ -87,23 +89,23 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
 
     private var musicViewModelRef: MusicViewModel? = null
-    private var pendingShortcutAction: String? = null
+    private var pendingIntent: Intent? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        pendingShortcutAction = intent?.action
+        pendingIntent = intent
 
         setContent {
             val musicViewModel: MusicViewModel = viewModel()
             musicViewModelRef = musicViewModel
             val settings by musicViewModel.settings.collectAsState()
 
-            LaunchedEffect(pendingShortcutAction) {
-                val act = pendingShortcutAction
-                if (act != null) {
-                    handleShortcutAction(act, musicViewModel)
-                    pendingShortcutAction = null
+            LaunchedEffect(pendingIntent) {
+                val incoming = pendingIntent
+                if (incoming != null) {
+                    handleIncomingIntent(incoming, musicViewModel)
+                    pendingIntent = null
                 }
             }
 
@@ -119,17 +121,39 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val act = intent.action ?: return
         val vm = musicViewModelRef
         if (vm != null) {
-            handleShortcutAction(act, vm)
+            handleIncomingIntent(intent, vm)
         } else {
-            pendingShortcutAction = act
+            pendingIntent = intent
         }
     }
 
-    private fun handleShortcutAction(action: String, vm: MusicViewModel) {
-        when (action) {
+    private fun handleIncomingIntent(intent: Intent, vm: MusicViewModel) {
+        if (intent.getBooleanExtra(MusicService.EXTRA_OPEN_NOW_PLAYING, false)) {
+            if (vm.playbackState.value.currentSong != null) {
+                vm.setNowPlayingExpanded(true)
+            }
+        }
+
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val uri = intent.data
+                if (uri != null) {
+                    vm.playExternalAudioUri(uri, intent.type)
+                }
+            }
+            Intent.ACTION_SEND -> {
+                val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+                } ?: intent.data
+                if (uri != null) {
+                    vm.playExternalAudioUri(uri, intent.type)
+                }
+            }
             "com.example.ACTION_SHUFFLE_ALL" -> {
                 vm.setNavigationScreen(NavigationScreen.LIBRARY)
                 val songs = vm.allSongs.value
@@ -159,6 +183,7 @@ fun MainAppContent(viewModel: MusicViewModel) {
     val playbackState by viewModel.playbackState.collectAsState()
     val volumeState by viewModel.volumeState.collectAsState()
     val visualizerBars by viewModel.visualizerBars.collectAsState()
+    val waveformBars by viewModel.waveformBars.collectAsState()
     val sleepTimerState by viewModel.sleepTimerState.collectAsState()
     val savedQueues by viewModel.savedQueues.collectAsState()
 
@@ -494,6 +519,7 @@ fun MainAppContent(viewModel: MusicViewModel) {
                 playbackState = playbackState,
                 volumeState = volumeState,
                 visualizerBars = visualizerBars,
+                waveformBars = waveformBars,
                 sleepTimerState = sleepTimerState,
                 settings = settings,
                 savedQueues = savedQueues,
@@ -501,7 +527,11 @@ fun MainAppContent(viewModel: MusicViewModel) {
                 onCollapse = { viewModel.setNowPlayingExpanded(false) },
                 onOpenEqualizer = { viewModel.setShowEqualizerScreen(true) },
                 onOpenCarMode = { viewModel.setCarMode(true) },
-                onOpenLyrics = { song -> lyricsSong = song }
+                onOpenLyrics = { song -> lyricsSong = song },
+                onImportLrc = { song ->
+                    lyricsSong = song
+                    importLrcLauncher.launch(arrayOf("*/*"))
+                }
             )
         }
 

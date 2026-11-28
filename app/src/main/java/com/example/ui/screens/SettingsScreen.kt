@@ -71,7 +71,9 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.preferences.AccentColorOption
 import com.example.data.preferences.AppThemeMode
+import com.example.data.preferences.DoubleTapGestureAction
 import com.example.data.preferences.PlayerScreenStyle
+import com.example.data.preferences.VisualizerMode
 import com.example.ui.MusicViewModel
 import java.util.Locale
 
@@ -174,6 +176,13 @@ fun SettingsScreen(
                 checked = settings.rememberPlaybackPosition,
                 onCheckedChange = { viewModel.setRememberPlaybackPosition(it) }
             )
+            SettingsDivider()
+            SwitchRow(
+                title = "Waveform Seekbar",
+                subtitle = "Show interactive audio waveform timeline in Now Playing",
+                checked = settings.waveformSeekbarEnabled,
+                onCheckedChange = { viewModel.setWaveformSeekbarEnabled(it) }
+            )
         }
 
         // 2. AUDIO & VOLUME
@@ -248,6 +257,38 @@ fun SettingsScreen(
                 checked = settings.karaokeHighlight,
                 onCheckedChange = { viewModel.setKaraokeHighlight(it) }
             )
+            SettingsDivider()
+            SwitchRow(
+                title = "Cinematic Credits Lyrics Overlay",
+                subtitle = "Movie-style vertical scrolling lyrics on Now Playing artwork",
+                checked = settings.cinematicLyricsEnabled,
+                onCheckedChange = { viewModel.setCinematicLyricsEnabled(it) }
+            )
+            SettingsDivider()
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Cinematic Lyrics Text Size", fontWeight = FontWeight.SemiBold)
+                    Text("${settings.lyricsFontSizeSp}sp", color = MaterialTheme.colorScheme.primary)
+                }
+                Slider(
+                    value = settings.lyricsFontSizeSp.toFloat(),
+                    onValueChange = { viewModel.setLyricsFontSizeSp(it.toInt()) },
+                    valueRange = 13f..28f,
+                    steps = 14
+                )
+            }
+            SettingsDivider()
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Lyrics Backdrop Contrast", fontWeight = FontWeight.SemiBold)
+                    Text("${(settings.lyricsBackdropContrast * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
+                }
+                Slider(
+                    value = settings.lyricsBackdropContrast,
+                    onValueChange = { viewModel.setLyricsBackdropContrast(it) },
+                    valueRange = 0f..0.9f
+                )
+            }
         }
 
         // 5. LIBRARY & STATS
@@ -465,6 +506,58 @@ fun SettingsScreen(
                         onClick = { viewModel.setPlayerStyle(style) },
                         label = { Text(style.label) }
                     )
+                }
+            }
+            SettingsDivider()
+            Text("Audio Visualizer Mode", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                VisualizerMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = settings.visualizerMode == mode,
+                        onClick = { viewModel.setVisualizerMode(mode) },
+                        label = { Text(mode.label) }
+                    )
+                }
+            }
+            SettingsDivider()
+            SwitchRow(
+                title = "Now Playing Gesture Controls",
+                subtitle = "Enable touch gestures on Now Playing stage",
+                checked = settings.gesturesEnabled,
+                onCheckedChange = { viewModel.setGesturesEnabled(it) }
+            )
+            if (settings.gesturesEnabled) {
+                SwitchRow(
+                    title = "Swipe Left / Right to Change Track",
+                    subtitle = "Horizontal swipe skips next or previous track",
+                    checked = settings.swipeTrackGestureEnabled,
+                    onCheckedChange = { viewModel.setSwipeTrackGestureEnabled(it) }
+                )
+                SwitchRow(
+                    title = "Right-Edge Vertical Volume Drag",
+                    subtitle = "Slide up or down on right edge to adjust volume",
+                    checked = settings.verticalVolumeGestureEnabled,
+                    onCheckedChange = { viewModel.setVerticalVolumeGestureEnabled(it) }
+                )
+                Text("Double-Tap Action", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DoubleTapGestureAction.entries.forEach { action ->
+                        FilterChip(
+                            selected = settings.doubleTapAction == action,
+                            onClick = { viewModel.setDoubleTapAction(action) },
+                            label = { Text(action.label) }
+                        )
+                    }
                 }
             }
         }

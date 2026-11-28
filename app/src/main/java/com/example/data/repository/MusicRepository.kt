@@ -38,6 +38,7 @@ class MusicRepository(
     private val settingsManager: SettingsManager
 ) {
     private val _rawSongs = MutableStateFlow<List<Song>>(emptyList())
+    private val deletedSessionIds = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning = _isScanning.asStateFlow()
@@ -100,6 +101,15 @@ class MusicRepository(
     val mostPlayedSongs: Flow<List<Song>> = combine(allSongs, musicDao.getMostPlayedMetadata()) { songs, stats ->
         val songMap = songs.associateBy { it.id }
         stats.mapNotNull { stat -> songMap[stat.songId]?.copy(playCount = stat.playCount) }
+    }
+
+    val lastPlayedSongs: Flow<List<Song>> = combine(allSongs, musicDao.getLastPlayedMetadata()) { songs, stats ->
+        val songMap = songs.associateBy { it.id }
+        stats.mapNotNull { stat -> songMap[stat.songId]?.copy(playCount = stat.playCount) }
+    }
+
+    val discoveryMixSongs: Flow<List<Song>> = allSongs.map { songs ->
+        songs.sortedWith(compareBy<Song> { it.playCount }.thenByDescending { it.dateAdded }).take(60)
     }
 
     val playlists: Flow<List<Playlist>> = musicDao.getAllPlaylists().map { entities ->
@@ -179,6 +189,7 @@ class MusicRepository(
         _isScanning.value = true
         val minDurMs = settingsManager.settings.value.minTrackDurationSec * 1000L
         val songs = mediaScanner.scanDeviceSongs(minDurMs)
+            .filterNot { it.id in deletedSessionIds }
         _rawSongs.value = songs
         _isScanning.value = false
         return songs
@@ -197,6 +208,7 @@ class MusicRepository(
     }
 
     suspend fun recordSongPlayed(songId: Long, durationListenedMs: Long = 0L) {
+        if (songId < 0L) return
         val now = System.currentTimeMillis()
         musicDao.insertRecentlyPlayed(RecentlyPlayedEntity(songId = songId, playedAt = now))
         val existing = musicDao.getSongMetadata(songId) ?: SongMetadataEntity(songId = songId)
@@ -213,14 +225,17 @@ class MusicRepository(
     }
 
     suspend fun addListeningDuration(songId: Long, deltaMs: Long) {
-        if (deltaMs <= 0L) return
-        val existing = musicDao.getSongMetadata(songId) ?: SongMetadataEntity(songId = songId)
-        musicDao.upsertSongMetadata(
-            existing.copy(totalListenTimeMs = existing.totalListenTimeMs + deltaMs)
-        )
-        musicDao.insertListeningHistory(
-            ListeningHistoryEntity(songId = songId, playedAt = System.currentTimeMillis(), durationMs = deltaMs)
-        )
+        if (deltaMs <= 0L || songId < 0L) return
+        val updatedRows = musicDao.addListenDurationAtomic(songId, deltaMs)
+        if (updatedRows == 0) {
+            musicDao.upsertSongMetadata(
+                SongMetadataEntity(
+                    songId = songId,
+                    totalListenTimeMs = deltaMs,
+                    lastPlayedAt = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     // Playlists
@@ -379,13 +394,20 @@ class MusicRepository(
     }
 
     suspend fun saveQueueState(queueId: Long, songIds: List<Long>, currentIndex: Int, positionMs: Long) {
-        musicDao.replaceQueueItems(queueId, songIds)
-        musicDao.updateQueueCursor(queueId, currentIndex, positionMs)
+        val persistableIds = songIds.filter { it >= 0L }
+        if (persistableIds.isEmpty() && songIds.any { it < 0L }) return
+        musicDao.replaceQueueItems(queueId, persistableIds)
+        musicDao.updateQueueCursor(queueId, currentIndex.coerceAtLeast(0), positionMs.coerceAtLeast(0L))
+    }
+
+    suspend fun saveQueuePositionOnly(queueId: Long, currentIndex: Int, positionMs: Long) {
+        musicDao.updateQueueCursor(queueId, currentIndex.coerceAtLeast(0), positionMs.coerceAtLeast(0L))
     }
 
     suspend fun getQueueSongIds(queueId: Long): List<Long> = musicDao.getQueueSongIdsSync(queueId)
 
     suspend fun purgeDeletedSongs(songIds: List<Long>) {
+        deletedSessionIds.addAll(songIds)
         for (id in songIds) {
             musicDao.purgeDeletedSong(id)
         }

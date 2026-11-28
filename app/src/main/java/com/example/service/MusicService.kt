@@ -56,6 +56,7 @@ class MusicService : MediaSessionService() {
         const val ACTION_WIDGET_PLAY_PAUSE = "com.example.action.WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.example.action.WIDGET_NEXT"
         const val ACTION_WIDGET_PREV = "com.example.action.WIDGET_PREV"
+        const val EXTRA_OPEN_NOW_PLAYING = "com.example.extra.OPEN_NOW_PLAYING"
 
         @Volatile
         var instance: MusicService? = null
@@ -107,6 +108,11 @@ class MusicService : MediaSessionService() {
                     repository.saveQueueState(queueId, songIds, idx, pos)
                 }
             },
+            onCursorPersistRequested = { queueId, idx, pos ->
+                serviceScope.launch {
+                    repository.saveQueuePositionOnly(queueId, idx, pos)
+                }
+            },
             onPlaybackVisualStateChanged = { state ->
                 LyneckMusicWidgetProvider.pushUpdate(
                     context = applicationContext,
@@ -117,6 +123,11 @@ class MusicService : MediaSessionService() {
                     } else null,
                     isPlaying = state.isPlaying
                 )
+                if (state.currentSong != null) {
+                    mediaSession?.let { session ->
+                        onUpdateNotification(session, playerManager.exoPlayer.playWhenReady)
+                    }
+                }
             }
         )
 
@@ -130,6 +141,7 @@ class MusicService : MediaSessionService() {
 
         val openPlayerIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_NOW_PLAYING, true)
         }
         val sessionActivityPendingIntent = PendingIntent.getActivity(
             this,
@@ -180,13 +192,36 @@ class MusicService : MediaSessionService() {
     private fun handleWidgetOrExternalTransport(action: () -> Unit) {
         if (playerManager.playbackState.value.queue.isNotEmpty()) {
             action()
+            mediaSession?.let { session ->
+                if (playerManager.playbackState.value.currentSong != null) {
+                    onUpdateNotification(session, playerManager.exoPlayer.playWhenReady)
+                }
+            }
             return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val loadingNotification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_widget_music_note)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.scanning))
+                .setOngoing(true)
+                .setSilent(true)
+                .build()
+            runCatching {
+                startForeground(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID, loadingNotification)
+            }
         }
         serviceScope.launch {
             val restored = restoreSavedQueueIfNeeded()
-            if (restored) {
-                withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
+                if (restored) {
                     action()
+                    mediaSession?.let { session ->
+                        onUpdateNotification(session, playerManager.exoPlayer.playWhenReady)
+                    }
+                } else {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
                 }
             }
         }

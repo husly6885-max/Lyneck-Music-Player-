@@ -116,11 +116,7 @@ class FileManager(private val context: Context) {
             // Check physical file path if accessible
             if (song.dataPath.isNotBlank()) {
                 val file = File(song.dataPath)
-                if (file.exists()) {
-                    // Attempt direct cleanup if MediaStore left stale file on older API
-                    val deleted = runCatching { file.delete() }.getOrDefault(false)
-                    if (!deleted && file.exists()) return true
-                }
+                if (file.exists()) return true
             }
             // Check MediaStore row
             val existsInStore = try {

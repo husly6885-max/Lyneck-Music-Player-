@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import com.example.data.model.Album
 import com.example.data.model.Artist
 import com.example.data.model.AudioFileDetails
@@ -319,4 +320,140 @@ class MediaScanner(private val context: Context) {
             fileExists = exists
         )
     }
+
+    /**
+     * Resolves an external audio URI from Android "Open With" (ACTION_VIEW / ACTION_SEND)
+     * safely via ContentResolver without assuming a direct filesystem path.
+     */
+    suspend fun resolveExternalAudioUri(uri: Uri, hintMimeType: String? = null): Result<Song> =
+        withContext(Dispatchers.IO) {
+            val resolver = context.contentResolver
+            val resolvedMime = (hintMimeType?.takeIf { it.isNotBlank() && it != "*/*" }
+                ?: runCatching { resolver.getType(uri) }.getOrNull()
+                ?: "").lowercase()
+
+            var displayName: String? = null
+            var fileSize = 0L
+            runCatching {
+                resolver.query(
+                    uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (nameIdx >= 0) displayName = cursor.getString(nameIdx)
+                        if (sizeIdx >= 0) fileSize = cursor.getLong(sizeIdx)
+                    }
+                }
+            }
+
+            if (resolvedMime.startsWith("video/") ||
+                !isAudioOnlyTrack(resolvedMime, displayName ?: uri.lastPathSegment)
+            ) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Video files are not supported in Lyneck audio player.")
+                )
+            }
+
+            // Verify URI is genuinely readable
+            val canRead = runCatching {
+                resolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+            }.getOrElse {
+                runCatching { resolver.openInputStream(uri)?.use { true } ?: false }.getOrDefault(false)
+            }
+            if (!canRead) {
+                return@withContext Result.failure(
+                    SecurityException("Cannot read selected audio file.")
+                )
+            }
+
+            var metaTitle: String? = null
+            var metaArtist: String? = null
+            var metaAlbum: String? = null
+            var metaGenre: String? = null
+            var metaDuration = 0L
+            var metaYear = 0
+            var metaTrack = 0
+            var metaMime: String? = null
+            var hasAudioTrack = false
+            var hasVideoTrack = false
+
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, uri)
+                metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                metaGenre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)
+                metaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                metaYear = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)
+                    ?.take(4)?.toIntOrNull() ?: 0
+                metaTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                    ?.substringBefore('/')?.toIntOrNull() ?: 0
+                metaMime = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                hasAudioTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+                    ?.equals("yes", ignoreCase = true) == true
+                hasVideoTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
+                    ?.equals("yes", ignoreCase = true) == true
+            } catch (_: Exception) {
+            } finally {
+                runCatching { retriever.release() }
+            }
+
+            val effectiveMime = (metaMime ?: resolvedMime).ifBlank { "audio/*" }.lowercase()
+            if (hasVideoTrack || effectiveMime.startsWith("video/")) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Unsupported video format.")
+                )
+            }
+            val looksAudio = hasAudioTrack ||
+                effectiveMime.startsWith("audio/") ||
+                effectiveMime == "application/ogg" ||
+                effectiveMime == "application/x-ogg" ||
+                effectiveMime == "application/flac" ||
+                effectiveMime == "application/x-flac" ||
+                (displayName?.substringAfterLast('.', "")?.lowercase() in setOf(
+                    "mp3", "wav", "flac", "aac", "m4a", "ogg", "opus", "wma", "amr", "mid"
+                ))
+
+            if (!looksAudio) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Unsupported file format.")
+                )
+            }
+
+            val fallbackTitle = displayName
+                ?.substringBeforeLast('.')
+                ?.takeIf { it.isNotBlank() }
+                ?: uri.lastPathSegment?.substringBeforeLast('.')?.takeIf { it.isNotBlank() }
+                ?: "External Audio"
+
+            val transientId = -kotlin.math.abs(uri.toString().hashCode().toLong()).coerceAtLeast(1L)
+            val dataPath = if (uri.scheme == "file") uri.path ?: "" else ""
+
+            Result.success(
+                Song(
+                    id = transientId,
+                    title = metaTitle?.takeIf { it.isNotBlank() } ?: fallbackTitle,
+                    artist = metaArtist?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "Unknown Artist",
+                    album = metaAlbum?.takeIf { it.isNotBlank() && it != "<unknown>" } ?: "External Audio",
+                    duration = metaDuration.coerceAtLeast(0L),
+                    contentUri = uri,
+                    albumId = -1L,
+                    dataPath = dataPath,
+                    folderPath = "",
+                    size = fileSize,
+                    dateAdded = System.currentTimeMillis() / 1000L,
+                    genre = metaGenre?.takeIf { it.isNotBlank() } ?: "Unknown Genre",
+                    year = metaYear,
+                    trackNumber = metaTrack,
+                    mimeType = effectiveMime
+                )
+            )
+        }
 }

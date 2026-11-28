@@ -17,7 +17,8 @@ data class LyricLine(
 data class ParsedLyrics(
     val lines: List<LyricLine>,
     val isSynced: Boolean,
-    val rawText: String
+    val rawText: String,
+    val embeddedOffsetMs: Long = 0L
 )
 
 class LyricsManager(private val context: Context) {
@@ -27,6 +28,7 @@ class LyricsManager(private val context: Context) {
     companion object {
         private val lineTimestampRegex = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]""")
         private val inlineKaraokeRegex = Regex("""<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>""")
+        private val offsetTagRegex = Regex("""\[offset:\s*([+-]?\d+)\s*]""", RegexOption.IGNORE_CASE)
 
         fun parseRaw(rawText: String): ParsedLyrics {
             if (rawText.isBlank()) {
@@ -35,8 +37,12 @@ class LyricsManager(private val context: Context) {
 
             val syncedLines = mutableListOf<LyricLine>()
             val rawLines = rawText.lines()
+            var embeddedOffset = 0L
 
             for (line in rawLines) {
+                offsetTagRegex.find(line)?.let { offMatch ->
+                    embeddedOffset = offMatch.groupValues[1].toLongOrNull() ?: embeddedOffset
+                }
                 val matches = lineTimestampRegex.findAll(line).toList()
                 if (matches.isNotEmpty()) {
                     val cleanedText = lineTimestampRegex.replace(line, "")
@@ -64,17 +70,39 @@ class LyricsManager(private val context: Context) {
                 ParsedLyrics(
                     lines = syncedLines.sortedBy { it.timestampMs },
                     isSynced = true,
-                    rawText = rawText
+                    rawText = rawText,
+                    embeddedOffsetMs = embeddedOffset
                 )
             } else {
-                val plainLines = rawLines.mapIndexed { idx, text ->
-                    LyricLine(timestampMs = idx.toLong() * 1000L, text = text)
-                }
+                val plainLines = rawLines
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .mapIndexed { idx, text ->
+                        LyricLine(timestampMs = idx.toLong() * 1000L, text = text)
+                    }
                 ParsedLyrics(
                     lines = plainLines,
                     isSynced = false,
-                    rawText = rawText
+                    rawText = rawText,
+                    embeddedOffsetMs = 0L
                 )
+            }
+        }
+
+        fun findActiveLineIndex(
+            parsed: ParsedLyrics,
+            positionMs: Long,
+            durationMs: Long = 0L,
+            offsetMs: Long = 0L
+        ): Int {
+            if (parsed.lines.isEmpty()) return -1
+            val effectivePos = (positionMs + offsetMs + parsed.embeddedOffsetMs).coerceAtLeast(0L)
+            return if (parsed.isSynced) {
+                parsed.lines.indexOfLast { it.timestampMs <= effectivePos }.coerceAtLeast(0)
+            } else {
+                val dur = durationMs.coerceAtLeast(1L)
+                val fraction = (positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 0.999f)
+                (fraction * parsed.lines.size).toInt().coerceIn(0, parsed.lines.lastIndex)
             }
         }
     }
@@ -114,9 +142,6 @@ class LyricsManager(private val context: Context) {
         }
     }
 
-    /**
-     * Lightweight pure-Kotlin ID3v2 USLT frame extractor (supports ID3v2.3 & ID3v2.4).
-     */
     private fun readEmbeddedId3Lyrics(uri: Uri): String? {
         return try {
             context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -148,7 +173,6 @@ class LyricsManager(private val context: Context) {
         }
 
         var offset = 0
-        // Skip extended header if present
         if ((flags and 0x40) != 0 && totalRead >= 4) {
             val extSize = if (majorVersion == 4) syncSafeInt(tagData, 0) else bigEndianInt(tagData, 0)
             offset += extSize.coerceAtLeast(4)
@@ -176,7 +200,6 @@ class LyricsManager(private val context: Context) {
     private fun decodeUsltFrame(data: ByteArray, start: Int, length: Int): String? {
         if (length < 5) return null
         val encoding = data[start].toInt() and 0xFF
-        // Bytes 1..3 are language code
         var pos = start + 4
         val end = start + length
 
@@ -188,7 +211,6 @@ class LyricsManager(private val context: Context) {
             else -> Charsets.UTF_8
         }
 
-        // Skip content descriptor (null-terminated)
         if (encoding == 1 || encoding == 2) {
             while (pos + 1 < end) {
                 if (data[pos] == 0.toByte() && data[pos + 1] == 0.toByte()) {

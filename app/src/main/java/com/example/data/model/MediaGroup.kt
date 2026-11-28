@@ -37,9 +37,11 @@ data class Playlist(
 
 enum class SmartPlaylistType(val title: String, val subtitle: String) {
     RECENTLY_PLAYED("Recently Played", "Your latest played tracks"),
+    LAST_PLAYED("Last Played", "Tracks ordered by last playback"),
     MOST_PLAYED("Most Played", "Your all-time top tracks"),
     RECENTLY_ADDED("Recently Added", "Newest audio files on device"),
-    FAVORITES("Favorites", "Songs you loved")
+    FAVORITES("Favorites", "Songs you loved"),
+    DISCOVERY_MIX("Discovery Mix", "Fresh & least-played gems")
 }
 
 enum class SortOrder(val label: String) {

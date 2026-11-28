@@ -8,6 +8,7 @@ import android.content.IntentSender
 import android.content.ServiceConnection
 import android.net.Uri
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.LyneckContainer
@@ -31,7 +32,9 @@ import com.example.data.model.Song
 import com.example.data.model.SortOrder
 import com.example.data.preferences.AccentColorOption
 import com.example.data.preferences.AppThemeMode
+import com.example.data.preferences.DoubleTapGestureAction
 import com.example.data.preferences.PlayerScreenStyle
+import com.example.data.preferences.VisualizerMode
 import com.example.data.storage.FileOpResult
 import com.example.data.storage.PendingStorageAction
 import com.example.playback.DeviceVolumeState
@@ -39,6 +42,7 @@ import com.example.playback.EqualizerState
 import com.example.playback.MusicPlayerManager
 import com.example.playback.PlaybackState
 import com.example.playback.SleepTimerState
+import com.example.playback.WaveformExtractor
 import com.example.service.MusicService
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.Job
@@ -49,7 +53,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -82,9 +88,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val container = LyneckContainer.get(application)
     val settingsManager = container.settingsManager
     val repository = container.repository
+    val mediaScanner = container.mediaScanner
     val fileManager = container.fileManager
     val lyricsManager = container.lyricsManager
     val m3uManager = container.m3uManager
+    private val waveformExtractor = WaveformExtractor(application)
 
     val settings = settingsManager.settings
 
@@ -102,6 +110,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var serviceObserverJobs = mutableListOf<Job>()
     private var pendingPlayerAction: ((MusicPlayerManager) -> Unit)? = null
     private var hasRestoredInitialQueue = false
+    private var waveformJob: Job? = null
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState = _playbackState.asStateFlow()
@@ -114,6 +123,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _visualizerBars = MutableStateFlow(List(24) { 0.05f })
     val visualizerBars = _visualizerBars.asStateFlow()
+
+    private val _waveformBars = MutableStateFlow(List(68) { 0.3f })
+    val waveformBars = _waveformBars.asStateFlow()
 
     private val _sleepTimerState = MutableStateFlow(SleepTimerState())
     val sleepTimerState = _sleepTimerState.asStateFlow()
@@ -202,8 +214,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val isScanning = repository.isScanning
     val favoriteSongs = repository.favoriteSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val recentlyPlayedSongs = repository.recentlyPlayedSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val lastPlayedSongs = repository.lastPlayedSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val recentlyAddedSongs = repository.recentlyAddedSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val mostPlayedSongs = repository.mostPlayedSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val discoveryMixSongs = repository.discoveryMixSongs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists = repository.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val excludedFolders = repository.excludedFolders.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val customEqPresets = repository.customEqualizerPresets.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -264,6 +278,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     restoreQueueIfReady()
                 }
             }
+        }
+        viewModelScope.launch {
+            playbackState
+                .map { it.currentSong }
+                .distinctUntilChanged { a, b -> a?.id == b?.id && a?.contentUri == b?.contentUri }
+                .collect { song ->
+                    waveformJob?.cancel()
+                    if (song == null) {
+                        _waveformBars.value = List(68) { 0.3f }
+                    } else {
+                        waveformJob = viewModelScope.launch {
+                            _waveformBars.value = waveformExtractor.extractWaveform(song)
+                        }
+                    }
+                }
         }
     }
 
@@ -420,8 +449,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateVisualizerActiveState() {
-        val style = settings.value.playerStyle
-        val active = _isNowPlayingExpanded.value && style == PlayerScreenStyle.VISUALIZER
+        val s = settings.value
+        val powerManager = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isBatterySaver = powerManager?.isPowerSaveMode == true
+        val modeActive = s.visualizerMode != VisualizerMode.OFF || s.playerStyle == PlayerScreenStyle.VISUALIZER
+        val active = _isNowPlayingExpanded.value && modeActive && !isBatterySaver
         withPlayer { it.setVisualizerActive(active) }
     }
 
@@ -486,7 +518,41 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun seekTo(positionMs: Long) = withPlayer { it.seekTo(positionMs) }
     fun toggleShuffle() = withPlayer { it.toggleShuffle() }
     fun toggleRepeat() = withPlayer { it.toggleRepeatMode() }
+    fun playExternalAudioUri(uri: Uri, hintMimeType: String? = null) {
+        viewModelScope.launch {
+            val matchedLibrarySong = allSongs.value.firstOrNull { it.contentUri == uri }
+            if (matchedLibrarySong != null) {
+                playSong(matchedLibrarySong, allSongs.value)
+                setNowPlayingExpanded(true)
+                return@launch
+            }
+            mediaScanner.resolveExternalAudioUri(uri, hintMimeType)
+                .onSuccess { externalSong ->
+                    playSong(externalSong, listOf(externalSong))
+                    setNowPlayingExpanded(true)
+                }
+                .onFailure { err ->
+                    _userMessage.emit(err.localizedMessage ?: "Unable to open this audio file.")
+                }
+        }
+    }
+
     fun toggleStopAfterCurrent() = withPlayer { it.toggleStopAfterCurrentTrack() }
+    fun toggleStopAfterCurrentPlaylist() = withPlayer { it.toggleStopAfterCurrentPlaylist() }
+
+    fun saveCurrentQueueAsPlaylist(name: String) {
+        val queue = playbackState.value.queue.filter { it.id >= 0L }
+        if (name.isBlank()) return
+        if (queue.isEmpty()) {
+            viewModelScope.launch { _userMessage.emit("Current queue has no library tracks to save.") }
+            return
+        }
+        viewModelScope.launch {
+            val plId = repository.createPlaylist(name)
+            repository.addSongsToPlaylist(plId, queue.map { it.id })
+            _userMessage.emit("Saved ${queue.size} track(s) to playlist \"${name.trim()}\"")
+        }
+    }
 
     fun startSleepTimer(minutes: Int, fadeOut: Boolean) {
         withPlayer { it.startSleepTimer(minutes, fadeOut) }
@@ -558,6 +624,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCrossfadeSeconds(seconds: Int) {
         settingsManager.update { it.copy(crossfadeSeconds = seconds.coerceIn(0, 12)) }
+        withPlayer { it.applyPlaybackSettings(settingsManager.settings.value) }
     }
 
     fun setFadeInOut(enabled: Boolean) {
@@ -1002,6 +1069,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutoScanOnStartup(enabled: Boolean) = settingsManager.update { it.copy(autoScanOnStartup = enabled) }
     fun setShowArtworkInNotification(enabled: Boolean) = settingsManager.update { it.copy(showArtworkInNotification = enabled) }
     fun setKeepPlayingOnTaskRemove(enabled: Boolean) = settingsManager.update { it.copy(keepPlayingOnTaskRemove = enabled) }
+    fun setWaveformSeekbarEnabled(enabled: Boolean) = settingsManager.update { it.copy(waveformSeekbarEnabled = enabled) }
+    fun setVisualizerMode(mode: VisualizerMode) {
+        settingsManager.update { it.copy(visualizerMode = mode) }
+        updateVisualizerActiveState()
+    }
+    fun setGesturesEnabled(enabled: Boolean) = settingsManager.update { it.copy(gesturesEnabled = enabled) }
+    fun setSwipeTrackGestureEnabled(enabled: Boolean) = settingsManager.update { it.copy(swipeTrackGestureEnabled = enabled) }
+    fun setVerticalVolumeGestureEnabled(enabled: Boolean) = settingsManager.update { it.copy(verticalVolumeGestureEnabled = enabled) }
+    fun setDoubleTapAction(action: DoubleTapGestureAction) = settingsManager.update { it.copy(doubleTapAction = action) }
+    fun setCinematicLyricsEnabled(enabled: Boolean) = settingsManager.update { it.copy(cinematicLyricsEnabled = enabled) }
+    fun setLyricsFontSizeSp(sizeSp: Int) = settingsManager.update { it.copy(lyricsFontSizeSp = sizeSp.coerceIn(13, 28)) }
+    fun setLyricsBackdropContrast(contrast: Float) = settingsManager.update { it.copy(lyricsBackdropContrast = contrast.coerceIn(0f, 0.9f)) }
 
     // Firebase Auth & Cloud Sync (Preserved)
     private fun observeAuthState() {

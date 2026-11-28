@@ -92,10 +92,14 @@ class LyneckAudioProcessor : BaseAudioProcessor() {
         }
 
         if (normalizeVolume && totalSamples > 0) {
-            val rms = sqrt(sumSq / totalSamples).toFloat().coerceAtLeast(0.01f)
-            val targetRms = 0.22f
-            val desiredGain = (targetRms / rms).coerceIn(0.6f, 2.2f)
-            smoothedGain = smoothedGain * 0.92f + desiredGain * 0.08f
+            val rms = sqrt(sumSq / totalSamples).toFloat()
+            if (rms > 0.012f) {
+                val targetRms = 0.22f
+                val desiredGain = (targetRms / rms).coerceIn(0.6f, 2.0f)
+                smoothedGain = smoothedGain * 0.96f + desiredGain * 0.04f
+            } else {
+                smoothedGain = smoothedGain * 0.96f + 1.0f * 0.04f
+            }
         } else {
             smoothedGain = 1.0f
         }

@@ -59,4 +59,10 @@
     <string name="shortcut_favorites_long">Open favorite songs</string>
     <string name="shortcut_search_short">Search</string>
     <string name="shortcut_search_long">Search offline music</string>
+    <string name="last_played">Last Played</string>
+    <string name="discovery_mix">Discovery Mix</string>
+    <string name="listening_history">Listening History</string>
+    <string name="save_queue_as_playlist">Save Queue as Playlist</string>
+    <string name="stop_after_playlist">Stop after current playlist</string>
+    <string name="open_with_error_video">Video files are not supported in Lyneck audio player.</string>
 </resources>

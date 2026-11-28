@@ -168,12 +168,15 @@ class AudioEffectsManager(
             loudnessEnhancer = null
         }
 
+        val mergedPresets = (defaultPresetNames() + presets)
+            .distinctBy { it.lowercase() }
+
         _eqState.value = _eqState.value.copy(
             supported = eqSupported,
             minLevelMb = minMb,
             maxLevelMb = maxMb,
             bands = bands,
-            builtInPresets = if (presets.isNotEmpty()) presets else defaultPresetNames(),
+            builtInPresets = mergedPresets,
             bassBoostSupported = bbSupported,
             virtualizerSupported = virtSupported
         )
@@ -235,10 +238,11 @@ class AudioEffectsManager(
         } catch (_: Exception) {
         }
 
-        // Apply subtle loudness / treble presence via LoudnessEnhancer if treble boost > 0
+        // Apply subtle treble clarity via LoudnessEnhancer, capped gently to avoid clipping with Volume Normalization
         try {
             loudnessEnhancer?.let { le ->
-                val gainMb = (settings.trebleBoost * 0.5f).toInt().coerceIn(0, 500)
+                val maxGain = if (settings.volumeNormalization) 250 else 380
+                val gainMb = (settings.trebleBoost * 0.38f).toInt().coerceIn(0, maxGain)
                 le.enabled = settings.equalizerEnabled && gainMb > 0
                 le.setTargetGain(gainMb)
             }
@@ -258,6 +262,23 @@ class AudioEffectsManager(
     }
 
     fun getPresetBandLevels(presetName: String, bandCount: Int): List<Int> {
+        val count = bandCount.coerceAtLeast(5)
+        val explicitCurve = when (presetName.lowercase()) {
+            "flat" -> listOf(0, 0, 0, 0, 0)
+            "bass boost" -> listOf(600, 400, 0, 0, 0)
+            "vocal" -> listOf(-200, 100, 500, 450, 150)
+            "cinema" -> listOf(550, 250, 100, 350, 450)
+            "rock" -> listOf(500, 300, -100, 300, 500)
+            "pop" -> listOf(-100, 200, 500, 200, -100)
+            "jazz" -> listOf(400, 200, -200, 200, 500)
+            "classical" -> listOf(500, 300, -100, 400, 400)
+            "dance" -> listOf(600, 400, 100, 300, 400)
+            "hip hop" -> listOf(500, 300, 0, 100, 300)
+            else -> null
+        }
+        if (explicitCurve != null) {
+            return List(count) { idx -> explicitCurve.getOrElse(idx) { explicitCurve.last() } }
+        }
         equalizer?.let { eq ->
             for (p in 0 until eq.numberOfPresets.toInt()) {
                 if (eq.getPresetName(p.toShort()).equals(presetName, ignoreCase = true)) {
@@ -268,20 +289,11 @@ class AudioEffectsManager(
                 }
             }
         }
-        return when (presetName.lowercase()) {
-            "bass boost" -> listOf(600, 400, 0, 0, 0)
-            "rock" -> listOf(500, 300, -100, 300, 500)
-            "pop" -> listOf(-100, 200, 500, 200, -100)
-            "jazz" -> listOf(400, 200, -200, 200, 500)
-            "classical" -> listOf(500, 300, -100, 400, 400)
-            "dance" -> listOf(600, 400, 100, 300, 400)
-            "hip hop" -> listOf(500, 300, 0, 100, 300)
-            else -> List(bandCount.coerceAtLeast(5)) { 0 }
-        }.take(bandCount.coerceAtLeast(5))
+        return List(count) { 0 }
     }
 
     private fun defaultPresetNames(): List<String> =
-        listOf("Flat", "Bass Boost", "Rock", "Pop", "Jazz", "Classical", "Dance", "Hip Hop")
+        listOf("Flat", "Bass Boost", "Vocal", "Cinema", "Rock", "Pop", "Jazz", "Classical", "Dance", "Hip Hop")
 
     fun releaseEffects() {
         try { equalizer?.release() } catch (_: Exception) {}

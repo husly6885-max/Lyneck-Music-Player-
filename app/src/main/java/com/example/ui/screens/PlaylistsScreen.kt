@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Shuffle
@@ -88,8 +89,10 @@ fun PlaylistsScreen(
     val allSongs by viewModel.allSongs.collectAsState()
     val favorites by viewModel.favoriteSongs.collectAsState()
     val recentlyPlayed by viewModel.recentlyPlayedSongs.collectAsState()
+    val lastPlayed by viewModel.lastPlayedSongs.collectAsState()
     val recentlyAdded by viewModel.recentlyAddedSongs.collectAsState()
     val mostPlayed by viewModel.mostPlayedSongs.collectAsState()
+    val discoveryMix by viewModel.discoveryMixSongs.collectAsState()
 
     val selectedPlaylist by viewModel.selectedPlaylist.collectAsState()
     val selectedSmart by viewModel.selectedSmartPlaylist.collectAsState()
@@ -104,9 +107,11 @@ fun PlaylistsScreen(
         val smart = selectedSmart!!
         val smartSongs = when (smart) {
             SmartPlaylistType.RECENTLY_PLAYED -> recentlyPlayed
+            SmartPlaylistType.LAST_PLAYED -> lastPlayed
             SmartPlaylistType.MOST_PLAYED -> mostPlayed
             SmartPlaylistType.RECENTLY_ADDED -> recentlyAdded
             SmartPlaylistType.FAVORITES -> favorites
+            SmartPlaylistType.DISCOVERY_MIX -> discoveryMix
         }
         BackHandler { viewModel.selectSmartPlaylist(null) }
         Column(modifier = modifier.fillMaxSize()) {
@@ -443,10 +448,17 @@ fun PlaylistsScreen(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    OutlinedButton(onClick = onImportPlaylistM3u, shape = RoundedCornerShape(12.dp)) {
-                        Icon(Icons.Rounded.FileDownload, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Import M3U")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { viewModel.setShowStatsScreen(true) }, shape = RoundedCornerShape(12.dp)) {
+                            Icon(Icons.Rounded.History, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("History")
+                        }
+                        OutlinedButton(onClick = onImportPlaylistM3u, shape = RoundedCornerShape(12.dp)) {
+                            Icon(Icons.Rounded.FileDownload, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Import")
+                        }
                     }
                 }
             }
@@ -467,9 +479,11 @@ fun PlaylistsScreen(
                     items(SmartPlaylistType.entries) { smart ->
                         val count = when (smart) {
                             SmartPlaylistType.RECENTLY_PLAYED -> recentlyPlayed.size
+                            SmartPlaylistType.LAST_PLAYED -> lastPlayed.size
                             SmartPlaylistType.MOST_PLAYED -> mostPlayed.size
                             SmartPlaylistType.RECENTLY_ADDED -> recentlyAdded.size
                             SmartPlaylistType.FAVORITES -> favorites.size
+                            SmartPlaylistType.DISCOVERY_MIX -> discoveryMix.size
                         }
                         Card(
                             modifier = Modifier

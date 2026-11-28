@@ -15,15 +15,20 @@ import com.example.data.local.entity.LyricsEntity
 import com.example.data.local.entity.PlaylistEntity
 import com.example.data.local.entity.PlaylistSongEntity
 import com.example.data.local.entity.SavedQueueEntity
+import com.example.data.local.entity.SongMetadataEntity
 import com.example.data.lyrics.LyricsManager
 import com.example.data.model.Song
 import com.example.data.playlist.M3uPlaylistManager
 import com.example.data.preferences.AccentColorOption
 import com.example.data.preferences.AppThemeMode
+import com.example.data.preferences.DoubleTapGestureAction
 import com.example.data.preferences.PlayerScreenStyle
 import com.example.data.preferences.SettingsManager
+import com.example.data.preferences.VisualizerMode
+import com.example.data.repository.MusicRepository
 import com.example.data.scanner.MediaScanner
 import com.example.data.storage.FileManager
+import com.example.playback.AudioEffectsManager
 import com.example.playback.DeviceVolumeState
 import com.example.playback.LyneckAudioProcessor
 import kotlinx.coroutines.flow.first
@@ -44,7 +49,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class LyneckUpgradeTest {
 
     private lateinit var context: Context
@@ -68,12 +73,14 @@ class LyneckUpgradeTest {
         val manager = LyricsManager(context)
         val raw = """
             [ti:Neon Echoes]
+            [offset:-200]
             [00:05.50]First <00:05.80>line <00:06.10>here
             [00:12.00][01:02.25]Chorus line
         """.trimIndent()
 
         val parsed = manager.parse(raw)
         assertTrue(parsed.isSynced)
+        assertEquals(-200L, parsed.embeddedOffsetMs)
         assertEquals(3, parsed.lines.size)
         assertEquals(5500L, parsed.lines[0].timestampMs)
         assertEquals("First line here", parsed.lines[0].text)
@@ -94,7 +101,7 @@ class LyneckUpgradeTest {
     }
 
     @Test
-    fun `settings manager persists values and round-trips JSON`() {
+    fun `settings manager persists values including visual and gesture settings and round-trips JSON`() {
         val settingsManager = SettingsManager(context)
         settingsManager.update {
             it.copy(
@@ -106,7 +113,16 @@ class LyneckUpgradeTest {
                 audioBalance = -0.5f,
                 volumeNormalization = true,
                 replayGainEnabled = true,
-                skipSilence = true
+                skipSilence = true,
+                waveformSeekbarEnabled = false,
+                visualizerMode = VisualizerMode.CIRCULAR,
+                gesturesEnabled = true,
+                swipeTrackGestureEnabled = false,
+                verticalVolumeGestureEnabled = true,
+                doubleTapAction = DoubleTapGestureAction.FAVORITE,
+                cinematicLyricsEnabled = true,
+                lyricsFontSizeSp = 24,
+                lyricsBackdropContrast = 0.85f
             )
         }
         val exported = settingsManager.exportToJson()
@@ -119,7 +135,11 @@ class LyneckUpgradeTest {
                 crossfadeSeconds = 0,
                 playbackSpeed = 1.0f,
                 audioBalance = 0f,
-                volumeNormalization = false
+                volumeNormalization = false,
+                waveformSeekbarEnabled = true,
+                visualizerMode = VisualizerMode.OFF,
+                doubleTapAction = DoubleTapGestureAction.PLAY_PAUSE,
+                lyricsFontSizeSp = 18
             )
         }
         settingsManager.importFromJson(exported)
@@ -134,10 +154,19 @@ class LyneckUpgradeTest {
         assertTrue(restored.volumeNormalization)
         assertTrue(restored.replayGainEnabled)
         assertTrue(restored.skipSilence)
+        assertFalse(restored.waveformSeekbarEnabled)
+        assertEquals(VisualizerMode.CIRCULAR, restored.visualizerMode)
+        assertTrue(restored.gesturesEnabled)
+        assertFalse(restored.swipeTrackGestureEnabled)
+        assertTrue(restored.verticalVolumeGestureEnabled)
+        assertEquals(DoubleTapGestureAction.FAVORITE, restored.doubleTapAction)
+        assertTrue(restored.cinematicLyricsEnabled)
+        assertEquals(24, restored.lyricsFontSizeSp)
+        assertEquals(0.85f, restored.lyricsBackdropContrast, 0.01f)
     }
 
     @Test
-    fun `dao playlist reorder multi-queue and purgeDeletedSong work cleanly`() = runTest {
+    fun `dao playlist reorder multi-queue lastPlayed listenDurationAtomic and purgeDeletedSong work cleanly`() = runTest {
         val dao = db.musicDao()
 
         val plId = dao.insertPlaylist(PlaylistEntity(name = "Roadtrip"))
@@ -154,6 +183,16 @@ class LyneckUpgradeTest {
         )
         dao.replacePlaylistOrder(plId, listOf(30L, 10L, 20L))
         assertEquals(listOf(30L, 10L, 20L), dao.getSongsForPlaylist(plId).first())
+
+        // Metadata + atomic listen duration + lastPlayed ordering
+        dao.upsertSongMetadata(SongMetadataEntity(songId = 10L, playCount = 2, lastPlayedAt = 1000L, totalListenTimeMs = 5000L))
+        dao.upsertSongMetadata(SongMetadataEntity(songId = 30L, playCount = 1, lastPlayedAt = 3000L, totalListenTimeMs = 2000L))
+        assertEquals(1, dao.addListenDurationAtomic(10L, 4000L))
+        assertEquals(0, dao.addListenDurationAtomic(999L, 1000L))
+        assertEquals(9000L, dao.getSongMetadata(10L)?.totalListenTimeMs)
+        assertEquals(11000L, dao.getTotalListeningTimeMs().first())
+        val lastPlayed = dao.getLastPlayedMetadata().first()
+        assertEquals(listOf(30L, 10L), lastPlayed.map { it.songId })
 
         // Bookmarks, favorites, lyrics, excluded folder, custom EQ, saved queue
         dao.insertFavorite(FavoriteEntity(songId = 20L))
@@ -175,6 +214,59 @@ class LyneckUpgradeTest {
         assertEquals(listOf(10L, 30L), dao.getQueueSongIdsSync(q1))
         assertNull(dao.getLyrics(20L))
         assertTrue(dao.getBookmarksForSong(20L).first().isEmpty())
+    }
+
+    @Test
+    fun `repository ignores transient negative song IDs during queue persistence while updating position`() = runTest {
+        val dao = db.musicDao()
+        val settingsManager = SettingsManager(context)
+        val scanner = MediaScanner(context)
+        val repo = MusicRepository(scanner, dao, settingsManager)
+
+        val queue = repo.ensureDefaultQueueExists()
+        repo.saveQueueState(queue.id, listOf(101L, 102L), currentIndex = 0, positionMs = 1500L)
+        assertEquals(listOf(101L, 102L), repo.getQueueSongIds(queue.id))
+
+        // Transient negative ID ("Open With" external file) must NOT wipe saved library queue
+        repo.saveQueueState(queue.id, listOf(-42L), currentIndex = 0, positionMs = 0L)
+        assertEquals(listOf(101L, 102L), repo.getQueueSongIds(queue.id))
+
+        // Position-only cursor persistence updates position without touching queue items
+        repo.saveQueuePositionOnly(queue.id, currentIndex = 1, positionMs = 42000L)
+        val updatedQueue = dao.getActiveQueueSync()
+        assertEquals(1, updatedQueue?.currentIndex)
+        assertEquals(42000L, updatedQueue?.positionMs)
+        assertEquals(listOf(101L, 102L), repo.getQueueSongIds(queue.id))
+    }
+
+    @Test
+    fun `media scanner resolves external audio file and rejects video files cleanly`() = runTest {
+        val scanner = MediaScanner(context)
+        val audioFile = File(context.cacheDir, "external_open_test.mp3").apply {
+            writeBytes(byteArrayOf(0x49, 0x44, 0x33, 0x03, 0x00, 0x00))
+        }
+        val audioResult = scanner.resolveExternalAudioUri(Uri.fromFile(audioFile), "audio/mpeg")
+        assertTrue(audioResult.isSuccess)
+        val resolvedSong = audioResult.getOrThrow()
+        assertTrue(resolvedSong.id < 0L)
+        assertEquals("external_open_test", resolvedSong.title)
+
+        val videoFile = File(context.cacheDir, "clip_open_test.mp4").apply {
+            writeBytes(byteArrayOf(0x00, 0x00, 0x00, 0x18))
+        }
+        val videoResult = scanner.resolveExternalAudioUri(Uri.fromFile(videoFile), "video/mp4")
+        assertTrue(videoResult.isFailure)
+    }
+
+    @Test
+    fun `audio effects manager provides Vocal and Cinema EQ preset curves`() {
+        val effects = AudioEffectsManager(context) {}
+        try {
+            assertEquals(listOf(-200, 100, 500, 450, 150), effects.getPresetBandLevels("Vocal", 5))
+            assertEquals(listOf(550, 250, 100, 350, 450), effects.getPresetBandLevels("Cinema", 5))
+        } finally {
+            effects.destroy()
+        }
     }
 
     @Test

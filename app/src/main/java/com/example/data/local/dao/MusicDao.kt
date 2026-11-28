@@ -130,6 +130,12 @@ interface MusicDao {
     @Query("SELECT * FROM song_metadata WHERE playCount > 0 ORDER BY playCount DESC LIMIT 100")
     fun getMostPlayedMetadata(): Flow<List<SongMetadataEntity>>
 
+    @Query("SELECT * FROM song_metadata WHERE lastPlayedAt > 0 ORDER BY lastPlayedAt DESC LIMIT 100")
+    fun getLastPlayedMetadata(): Flow<List<SongMetadataEntity>>
+
+    @Query("UPDATE song_metadata SET totalListenTimeMs = totalListenTimeMs + :deltaMs WHERE songId = :songId")
+    suspend fun addListenDurationAtomic(songId: Long, deltaMs: Long): Int
+
     // Lyrics
     @Query("SELECT * FROM lyrics WHERE songId = :songId")
     fun observeLyrics(songId: Long): Flow<LyricsEntity?>
@@ -166,7 +172,7 @@ interface MusicDao {
     @Query("SELECT * FROM listening_history ORDER BY playedAt DESC LIMIT 200")
     fun getListeningHistory(): Flow<List<ListeningHistoryEntity>>
 
-    @Query("SELECT COALESCE(SUM(durationMs), 0) FROM listening_history")
+    @Query("SELECT COALESCE(SUM(totalListenTimeMs), 0) FROM song_metadata")
     fun getTotalListeningTimeMs(): Flow<Long>
 
     @Query("SELECT COUNT(*) FROM listening_history")

@@ -32,6 +32,19 @@ enum class PlayerScreenStyle(val label: String) {
     MINIMAL("Minimalist")
 }
 
+enum class VisualizerMode(val label: String) {
+    OFF("Off"),
+    SPECTRUM_BARS("Spectrum Bars"),
+    WAVEFORM("Waveform"),
+    CIRCULAR("Circular")
+}
+
+enum class DoubleTapGestureAction(val label: String) {
+    NONE("Off"),
+    PLAY_PAUSE("Play / Pause"),
+    FAVORITE("Toggle Favorite")
+}
+
 data class AppSettings(
     // Appearance
     val themeMode: AppThemeMode = AppThemeMode.OCEAN_NAVY,
@@ -49,6 +62,14 @@ data class AppSettings(
     val rememberPlaybackPosition: Boolean = true,
     val lastSongId: Long = -1L,
     val lastPositionMs: Long = 0L,
+    val waveformSeekbarEnabled: Boolean = true,
+    val visualizerMode: VisualizerMode = VisualizerMode.SPECTRUM_BARS,
+
+    // Gestures
+    val gesturesEnabled: Boolean = true,
+    val swipeTrackGestureEnabled: Boolean = true,
+    val verticalVolumeGestureEnabled: Boolean = true,
+    val doubleTapAction: DoubleTapGestureAction = DoubleTapGestureAction.PLAY_PAUSE,
 
     // Audio & Equalizer
     val equalizerEnabled: Boolean = false,
@@ -66,10 +87,13 @@ data class AppSettings(
     val headphoneBandLevelsCsv: String = "200,100,0,100,200",
     val speakerBandLevelsCsv: String = "0,0,150,200,150",
 
-    // Lyrics
+    // Lyrics & Cinematic Overlay
     val autoLoadExternalLrc: Boolean = true,
     val karaokeHighlight: Boolean = true,
     val defaultLyricsOffsetMs: Long = 0L,
+    val cinematicLyricsEnabled: Boolean = true,
+    val lyricsFontSizeSp: Int = 18,
+    val lyricsBackdropContrast: Float = 0.55f,
 
     // Library
     val sortOrder: SortOrder = SortOrder.TITLE_ASC,
@@ -102,6 +126,16 @@ class SettingsManager(context: Context) {
         val playerStyle = runCatching { PlayerScreenStyle.valueOf(styleStr) }
             .getOrDefault(PlayerScreenStyle.CLASSIC)
 
+        val vizStr = prefs.getString("visualizer_mode", VisualizerMode.SPECTRUM_BARS.name)
+            ?: VisualizerMode.SPECTRUM_BARS.name
+        val visualizerMode = runCatching { VisualizerMode.valueOf(vizStr) }
+            .getOrDefault(VisualizerMode.SPECTRUM_BARS)
+
+        val dtStr = prefs.getString("double_tap_action", DoubleTapGestureAction.PLAY_PAUSE.name)
+            ?: DoubleTapGestureAction.PLAY_PAUSE.name
+        val doubleTapAction = runCatching { DoubleTapGestureAction.valueOf(dtStr) }
+            .getOrDefault(DoubleTapGestureAction.PLAY_PAUSE)
+
         val sortStr = prefs.getString("sort_order", SortOrder.TITLE_ASC.name) ?: SortOrder.TITLE_ASC.name
         val sortOrder = runCatching { SortOrder.valueOf(sortStr) }.getOrDefault(SortOrder.TITLE_ASC)
 
@@ -119,6 +153,12 @@ class SettingsManager(context: Context) {
             rememberPlaybackPosition = prefs.getBoolean("remember_position", true),
             lastSongId = prefs.getLong("last_song_id", -1L),
             lastPositionMs = prefs.getLong("last_position_ms", 0L),
+            waveformSeekbarEnabled = prefs.getBoolean("waveform_seekbar", true),
+            visualizerMode = visualizerMode,
+            gesturesEnabled = prefs.getBoolean("gestures_enabled", true),
+            swipeTrackGestureEnabled = prefs.getBoolean("swipe_track_gesture", true),
+            verticalVolumeGestureEnabled = prefs.getBoolean("vertical_volume_gesture", true),
+            doubleTapAction = doubleTapAction,
             equalizerEnabled = prefs.getBoolean("eq_enabled", false),
             activeEqPresetName = prefs.getString("eq_preset", "Flat") ?: "Flat",
             eqBandLevelsCsv = prefs.getString("eq_bands", "0,0,0,0,0") ?: "0,0,0,0,0",
@@ -136,6 +176,9 @@ class SettingsManager(context: Context) {
             autoLoadExternalLrc = prefs.getBoolean("auto_load_lrc", true),
             karaokeHighlight = prefs.getBoolean("karaoke_highlight", true),
             defaultLyricsOffsetMs = prefs.getLong("default_lyrics_offset", 0L),
+            cinematicLyricsEnabled = prefs.getBoolean("cinematic_lyrics_enabled", true),
+            lyricsFontSizeSp = prefs.getInt("lyrics_font_size_sp", 18).coerceIn(13, 28),
+            lyricsBackdropContrast = prefs.getFloat("lyrics_backdrop_contrast", 0.55f).coerceIn(0f, 0.9f),
             sortOrder = sortOrder,
             autoScanOnStartup = prefs.getBoolean("auto_scan_startup", true),
             minTrackDurationSec = prefs.getInt("min_track_duration_sec", 10),
@@ -173,6 +216,12 @@ class SettingsManager(context: Context) {
             .putBoolean("remember_position", s.rememberPlaybackPosition)
             .putLong("last_song_id", s.lastSongId)
             .putLong("last_position_ms", s.lastPositionMs)
+            .putBoolean("waveform_seekbar", s.waveformSeekbarEnabled)
+            .putString("visualizer_mode", s.visualizerMode.name)
+            .putBoolean("gestures_enabled", s.gesturesEnabled)
+            .putBoolean("swipe_track_gesture", s.swipeTrackGestureEnabled)
+            .putBoolean("vertical_volume_gesture", s.verticalVolumeGestureEnabled)
+            .putString("double_tap_action", s.doubleTapAction.name)
             .putBoolean("eq_enabled", s.equalizerEnabled)
             .putString("eq_preset", s.activeEqPresetName)
             .putString("eq_bands", s.eqBandLevelsCsv)
@@ -190,6 +239,9 @@ class SettingsManager(context: Context) {
             .putBoolean("auto_load_lrc", s.autoLoadExternalLrc)
             .putBoolean("karaoke_highlight", s.karaokeHighlight)
             .putLong("default_lyrics_offset", s.defaultLyricsOffsetMs)
+            .putBoolean("cinematic_lyrics_enabled", s.cinematicLyricsEnabled)
+            .putInt("lyrics_font_size_sp", s.lyricsFontSizeSp)
+            .putFloat("lyrics_backdrop_contrast", s.lyricsBackdropContrast)
             .putString("sort_order", s.sortOrder.name)
             .putBoolean("auto_scan_startup", s.autoScanOnStartup)
             .putInt("min_track_duration_sec", s.minTrackDurationSec)
@@ -210,6 +262,12 @@ class SettingsManager(context: Context) {
             put("playbackSpeed", s.playbackSpeed.toDouble())
             put("skipSilence", s.skipSilence)
             put("rememberPlaybackPosition", s.rememberPlaybackPosition)
+            put("waveformSeekbarEnabled", s.waveformSeekbarEnabled)
+            put("visualizerMode", s.visualizerMode.name)
+            put("gesturesEnabled", s.gesturesEnabled)
+            put("swipeTrackGestureEnabled", s.swipeTrackGestureEnabled)
+            put("verticalVolumeGestureEnabled", s.verticalVolumeGestureEnabled)
+            put("doubleTapAction", s.doubleTapAction.name)
             put("equalizerEnabled", s.equalizerEnabled)
             put("activeEqPresetName", s.activeEqPresetName)
             put("eqBandLevelsCsv", s.eqBandLevelsCsv)
@@ -224,6 +282,9 @@ class SettingsManager(context: Context) {
             put("separateHeadphoneProfile", s.separateHeadphoneProfile)
             put("autoLoadExternalLrc", s.autoLoadExternalLrc)
             put("karaokeHighlight", s.karaokeHighlight)
+            put("cinematicLyricsEnabled", s.cinematicLyricsEnabled)
+            put("lyricsFontSizeSp", s.lyricsFontSizeSp)
+            put("lyricsBackdropContrast", s.lyricsBackdropContrast.toDouble())
             put("sortOrder", s.sortOrder.name)
             put("minTrackDurationSec", s.minTrackDurationSec)
             put("showArtworkInNotification", s.showArtworkInNotification)
@@ -243,6 +304,12 @@ class SettingsManager(context: Context) {
                 playbackSpeed = obj.optDouble("playbackSpeed", cur.playbackSpeed.toDouble()).toFloat(),
                 skipSilence = obj.optBoolean("skipSilence", cur.skipSilence),
                 rememberPlaybackPosition = obj.optBoolean("rememberPlaybackPosition", cur.rememberPlaybackPosition),
+                waveformSeekbarEnabled = obj.optBoolean("waveformSeekbarEnabled", cur.waveformSeekbarEnabled),
+                visualizerMode = runCatching { VisualizerMode.valueOf(obj.optString("visualizerMode", cur.visualizerMode.name)) }.getOrDefault(cur.visualizerMode),
+                gesturesEnabled = obj.optBoolean("gesturesEnabled", cur.gesturesEnabled),
+                swipeTrackGestureEnabled = obj.optBoolean("swipeTrackGestureEnabled", cur.swipeTrackGestureEnabled),
+                verticalVolumeGestureEnabled = obj.optBoolean("verticalVolumeGestureEnabled", cur.verticalVolumeGestureEnabled),
+                doubleTapAction = runCatching { DoubleTapGestureAction.valueOf(obj.optString("doubleTapAction", cur.doubleTapAction.name)) }.getOrDefault(cur.doubleTapAction),
                 equalizerEnabled = obj.optBoolean("equalizerEnabled", cur.equalizerEnabled),
                 activeEqPresetName = obj.optString("activeEqPresetName", cur.activeEqPresetName),
                 eqBandLevelsCsv = obj.optString("eqBandLevelsCsv", cur.eqBandLevelsCsv),
@@ -257,6 +324,9 @@ class SettingsManager(context: Context) {
                 separateHeadphoneProfile = obj.optBoolean("separateHeadphoneProfile", cur.separateHeadphoneProfile),
                 autoLoadExternalLrc = obj.optBoolean("autoLoadExternalLrc", cur.autoLoadExternalLrc),
                 karaokeHighlight = obj.optBoolean("karaokeHighlight", cur.karaokeHighlight),
+                cinematicLyricsEnabled = obj.optBoolean("cinematicLyricsEnabled", cur.cinematicLyricsEnabled),
+                lyricsFontSizeSp = obj.optInt("lyricsFontSizeSp", cur.lyricsFontSizeSp).coerceIn(13, 28),
+                lyricsBackdropContrast = obj.optDouble("lyricsBackdropContrast", cur.lyricsBackdropContrast.toDouble()).toFloat().coerceIn(0f, 0.9f),
                 sortOrder = runCatching { SortOrder.valueOf(obj.optString("sortOrder", cur.sortOrder.name)) }.getOrDefault(cur.sortOrder),
                 minTrackDurationSec = obj.optInt("minTrackDurationSec", cur.minTrackDurationSec),
                 showArtworkInNotification = obj.optBoolean("showArtworkInNotification", cur.showArtworkInNotification),

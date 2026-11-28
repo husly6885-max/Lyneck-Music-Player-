@@ -1,16 +1,22 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode as AnimRepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +44,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -92,11 +99,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
@@ -109,6 +118,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -120,13 +130,17 @@ import com.example.R
 import com.example.data.model.PlaybackQueueInfo
 import com.example.data.model.Song
 import com.example.data.preferences.AppSettings
+import com.example.data.preferences.DoubleTapGestureAction
 import com.example.data.preferences.PlayerScreenStyle
+import com.example.data.preferences.VisualizerMode
 import com.example.playback.DeviceVolumeState
 import com.example.playback.PlaybackState
 import com.example.playback.RepeatMode
 import com.example.playback.SleepTimerState
 import com.example.ui.MusicViewModel
+import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -134,6 +148,7 @@ fun NowPlayingScreen(
     playbackState: PlaybackState,
     volumeState: DeviceVolumeState,
     visualizerBars: List<Float>,
+    waveformBars: List<Float>,
     sleepTimerState: SleepTimerState,
     settings: AppSettings,
     savedQueues: List<PlaybackQueueInfo>,
@@ -142,6 +157,7 @@ fun NowPlayingScreen(
     onOpenEqualizer: () -> Unit,
     onOpenCarMode: () -> Unit,
     onOpenLyrics: (Song) -> Unit,
+    onImportLrc: (Song) -> Unit = { onOpenLyrics(it) },
     modifier: Modifier = Modifier
 ) {
     val song = playbackState.currentSong ?: return
@@ -150,6 +166,16 @@ fun NowPlayingScreen(
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showCreateQueueDialog by remember { mutableStateOf(false) }
+    var showSaveQueuePlaylistDialog by remember { mutableStateOf(false) }
+    var isLyricsOverlayVisible by remember { mutableStateOf(true) }
+    var gestureFeedbackText by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(gestureFeedbackText) {
+        if (gestureFeedbackText != null) {
+            delay(1300L)
+            gestureFeedbackText = null
+        }
+    }
 
     var isDraggingSlider by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableFloatStateOf(0f) }
@@ -216,6 +242,7 @@ fun NowPlayingScreen(
                             NowPlayingTopBar(
                                 sleepTimerState = sleepTimerState,
                                 stopAfterCurrentTrack = playbackState.stopAfterCurrentTrack,
+                                stopAfterCurrentPlaylist = playbackState.stopAfterCurrentPlaylist,
                                 primaryColor = playerPrimaryColor,
                                 accentPrimary = accentPrimary,
                                 onCollapse = onCollapse,
@@ -232,20 +259,49 @@ fun NowPlayingScreen(
                                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                                 verticalAlignment = Alignment.Bottom
                             ) {
-                                // Open background showcase side
-                                Box(
+                                // Open background showcase side with Cinematic Lyrics, Visualizer & Gestures
+                                NowPlayingVisualStage(
+                                    song = song,
+                                    currentPositionMs = currentPosition,
+                                    durationMs = duration,
+                                    isPlaying = playbackState.isPlaying,
+                                    visualizerBars = visualizerBars,
+                                    volumeState = volumeState,
+                                    settings = settings,
+                                    viewModel = viewModel,
+                                    isLyricsOverlayVisible = isLyricsOverlayVisible,
+                                    gestureFeedbackText = gestureFeedbackText,
+                                    accentPrimary = accentPrimary,
+                                    accentSecondary = accentSecondary,
+                                    onToggleLyricsOverlay = { isLyricsOverlayVisible = !isLyricsOverlayVisible },
+                                    onOpenFullLyrics = { onOpenLyrics(song) },
+                                    onImportLrc = { onImportLrc(song) },
+                                    onSeekTo = { viewModel.seekTo(it) },
+                                    onPrevious = {
+                                        viewModel.playPrevious()
+                                        gestureFeedbackText = "Previous Track"
+                                    },
+                                    onNext = {
+                                        viewModel.playNext()
+                                        gestureFeedbackText = "Next Track"
+                                    },
+                                    onTogglePlayPause = {
+                                        viewModel.togglePlayPause()
+                                        gestureFeedbackText = if (playbackState.isPlaying) "Paused" else "Playing"
+                                    },
+                                    onToggleFavorite = {
+                                        viewModel.toggleFavorite(song)
+                                        gestureFeedbackText = if (song.isFavorite) "Removed Favorite" else "Added to Favorites"
+                                    },
+                                    onVolumeChange = { ratio ->
+                                        viewModel.setDeviceVolumeRatio(ratio)
+                                        gestureFeedbackText = "Volume ${(ratio * 100f).roundToInt()}%"
+                                    },
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight()
-                                        .padding(bottom = 12.dp),
-                                    contentAlignment = Alignment.BottomCenter
-                                ) {
-                                    when (settings.playerStyle) {
-                                        PlayerScreenStyle.VISUALIZER -> VisualizerBarsStrip(bars = visualizerBars)
-                                        PlayerScreenStyle.MINIMAL -> MinimalTrackFormatBadge(song = song)
-                                        PlayerScreenStyle.CLASSIC, PlayerScreenStyle.VINYL -> Unit
-                                    }
-                                }
+                                        .padding(bottom = 12.dp)
+                                )
 
                                 // Controls panel on right side with dark translucent backdrop
                                 Surface(
@@ -267,6 +323,7 @@ fun NowPlayingScreen(
                                             song = song,
                                             playbackState = playbackState,
                                             volumeState = volumeState,
+                                            waveformBars = waveformBars,
                                             settings = settings,
                                             sliderValue = sliderValue,
                                             currentPosition = currentPosition,
@@ -290,6 +347,11 @@ fun NowPlayingScreen(
                                             onOpenLyrics = { onOpenLyrics(song) },
                                             onOpenBookmarks = { showBookmarksSheet = true },
                                             onOpenEqualizer = onOpenEqualizer,
+                                            onCycleVisualizer = {
+                                                val all = VisualizerMode.entries
+                                                val next = all[(all.indexOf(settings.visualizerMode) + 1) % all.size]
+                                                viewModel.setVisualizerMode(next)
+                                            },
                                             onToggleSpeedMenu = { showSpeedMenu = it },
                                             onSelectSpeed = { spd ->
                                                 viewModel.setPlaybackSpeed(spd)
@@ -324,6 +386,7 @@ fun NowPlayingScreen(
                             NowPlayingTopBar(
                                 sleepTimerState = sleepTimerState,
                                 stopAfterCurrentTrack = playbackState.stopAfterCurrentTrack,
+                                stopAfterCurrentPlaylist = playbackState.stopAfterCurrentPlaylist,
                                 primaryColor = playerPrimaryColor,
                                 accentPrimary = accentPrimary,
                                 onCollapse = onCollapse,
@@ -332,21 +395,50 @@ fun NowPlayingScreen(
                                 onOpenQueue = { showQueueSheet = true }
                             )
 
-                            // Open upper-center stage so the custom background image remains prominent
+                            // Open upper-center stage so custom artwork stays prominent with Cinematic Lyrics, Visualizer & Gestures
                             if (!isCompactHeight) {
-                                Box(
+                                NowPlayingVisualStage(
+                                    song = song,
+                                    currentPositionMs = currentPosition,
+                                    durationMs = duration,
+                                    isPlaying = playbackState.isPlaying,
+                                    visualizerBars = visualizerBars,
+                                    volumeState = volumeState,
+                                    settings = settings,
+                                    viewModel = viewModel,
+                                    isLyricsOverlayVisible = isLyricsOverlayVisible,
+                                    gestureFeedbackText = gestureFeedbackText,
+                                    accentPrimary = accentPrimary,
+                                    accentSecondary = accentSecondary,
+                                    onToggleLyricsOverlay = { isLyricsOverlayVisible = !isLyricsOverlayVisible },
+                                    onOpenFullLyrics = { onOpenLyrics(song) },
+                                    onImportLrc = { onImportLrc(song) },
+                                    onSeekTo = { viewModel.seekTo(it) },
+                                    onPrevious = {
+                                        viewModel.playPrevious()
+                                        gestureFeedbackText = "Previous Track"
+                                    },
+                                    onNext = {
+                                        viewModel.playNext()
+                                        gestureFeedbackText = "Next Track"
+                                    },
+                                    onTogglePlayPause = {
+                                        viewModel.togglePlayPause()
+                                        gestureFeedbackText = if (playbackState.isPlaying) "Paused" else "Playing"
+                                    },
+                                    onToggleFavorite = {
+                                        viewModel.toggleFavorite(song)
+                                        gestureFeedbackText = if (song.isFavorite) "Removed Favorite" else "Added to Favorites"
+                                    },
+                                    onVolumeChange = { ratio ->
+                                        viewModel.setDeviceVolumeRatio(ratio)
+                                        gestureFeedbackText = "Volume ${(ratio * 100f).roundToInt()}%"
+                                    },
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
-                                        .padding(vertical = 6.dp),
-                                    contentAlignment = Alignment.BottomCenter
-                                ) {
-                                    when (settings.playerStyle) {
-                                        PlayerScreenStyle.VISUALIZER -> VisualizerBarsStrip(bars = visualizerBars)
-                                        PlayerScreenStyle.MINIMAL -> MinimalTrackFormatBadge(song = song)
-                                        PlayerScreenStyle.CLASSIC, PlayerScreenStyle.VINYL -> Unit
-                                    }
-                                }
+                                        .padding(vertical = 6.dp)
+                                )
                             }
 
                             Column(
@@ -357,6 +449,7 @@ fun NowPlayingScreen(
                                     song = song,
                                     playbackState = playbackState,
                                     volumeState = volumeState,
+                                    waveformBars = waveformBars,
                                     settings = settings,
                                     sliderValue = sliderValue,
                                     currentPosition = currentPosition,
@@ -380,6 +473,11 @@ fun NowPlayingScreen(
                                     onOpenLyrics = { onOpenLyrics(song) },
                                     onOpenBookmarks = { showBookmarksSheet = true },
                                     onOpenEqualizer = onOpenEqualizer,
+                                    onCycleVisualizer = {
+                                        val all = VisualizerMode.entries
+                                        val next = all[(all.indexOf(settings.visualizerMode) + 1) % all.size]
+                                        viewModel.setVisualizerMode(next)
+                                    },
                                     onToggleSpeedMenu = { showSpeedMenu = it },
                                     onSelectSpeed = { spd ->
                                         viewModel.setPlaybackSpeed(spd)
@@ -401,7 +499,7 @@ fun NowPlayingScreen(
         }
     }
 
-    // Queue Sheet with Multiple Independent Queues & Reordering
+    // Queue Sheet with Multiple Independent Queues, Reordering & Save as Playlist
     if (showQueueSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
@@ -421,9 +519,19 @@ fun NowPlayingScreen(
                     Text(
                         text = "${playbackState.activeQueueName} (${playbackState.queue.size})",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Row {
+                        IconButton(
+                            onClick = { showSaveQueuePlaylistDialog = true },
+                            enabled = playbackState.queue.any { it.id >= 0L },
+                            modifier = Modifier.testTag("save_queue_as_playlist_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Save Queue as Playlist")
+                        }
                         IconButton(onClick = { showCreateQueueDialog = true }) {
                             Icon(Icons.Rounded.Add, contentDescription = "New Queue")
                         }
@@ -548,9 +656,24 @@ fun NowPlayingScreen(
         )
     }
 
+    if (showSaveQueuePlaylistDialog) {
+        SaveQueueAsPlaylistDialog(
+            defaultName = playbackState.activeQueueName.ifBlank { "Saved Queue" },
+            onDismiss = { showSaveQueuePlaylistDialog = false },
+            onConfirm = { name ->
+                viewModel.saveCurrentQueueAsPlaylist(name)
+                showSaveQueuePlaylistDialog = false
+            }
+        )
+    }
+
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             sleepTimerState = sleepTimerState,
+            stopAfterCurrentTrack = playbackState.stopAfterCurrentTrack,
+            stopAfterCurrentPlaylist = playbackState.stopAfterCurrentPlaylist,
+            onToggleStopAfterTrack = { viewModel.toggleStopAfterCurrent() },
+            onToggleStopAfterPlaylist = { viewModel.toggleStopAfterCurrentPlaylist() },
             onStartTimer = { min, fade ->
                 viewModel.startSleepTimer(min, fade)
                 showSleepTimerDialog = false
@@ -574,9 +697,199 @@ fun NowPlayingScreen(
 }
 
 @Composable
+private fun NowPlayingVisualStage(
+    song: Song,
+    currentPositionMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean,
+    visualizerBars: List<Float>,
+    volumeState: DeviceVolumeState,
+    settings: AppSettings,
+    viewModel: MusicViewModel,
+    isLyricsOverlayVisible: Boolean,
+    gestureFeedbackText: String?,
+    accentPrimary: Color,
+    accentSecondary: Color,
+    onToggleLyricsOverlay: () -> Unit,
+    onOpenFullLyrics: () -> Unit,
+    onImportLrc: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestOnNext by rememberUpdatedState(onNext)
+    val latestOnPrevious by rememberUpdatedState(onPrevious)
+    val latestOnTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
+    val latestOnToggleFavorite by rememberUpdatedState(onToggleFavorite)
+    val latestVolumeRatio by rememberUpdatedState(volumeState.ratio)
+    val latestOnVolumeChange by rememberUpdatedState(onVolumeChange)
+
+    val effectiveVisualizerMode = when {
+        settings.visualizerMode != VisualizerMode.OFF -> settings.visualizerMode
+        settings.playerStyle == PlayerScreenStyle.VISUALIZER -> VisualizerMode.SPECTRUM_BARS
+        else -> VisualizerMode.OFF
+    }
+
+    val gestureModifier = Modifier
+        .then(
+            if (settings.gesturesEnabled && settings.swipeTrackGestureEnabled) {
+                Modifier.pointerInput(song.id) {
+                    var totalDrag = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDrag = 0f },
+                        onHorizontalDrag = { _, dragAmount -> totalDrag += dragAmount },
+                        onDragEnd = {
+                            if (totalDrag > 95f) latestOnPrevious()
+                            else if (totalDrag < -95f) latestOnNext()
+                        }
+                    )
+                }
+            } else Modifier
+        )
+        .then(
+            if (settings.gesturesEnabled && settings.doubleTapAction != DoubleTapGestureAction.NONE) {
+                Modifier.pointerInput(song.id, settings.doubleTapAction) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            when (settings.doubleTapAction) {
+                                DoubleTapGestureAction.PLAY_PAUSE -> latestOnTogglePlayPause()
+                                DoubleTapGestureAction.FAVORITE -> latestOnToggleFavorite()
+                                DoubleTapGestureAction.NONE -> Unit
+                            }
+                        }
+                    )
+                }
+            } else Modifier
+        )
+
+    Box(
+        modifier = modifier
+            .then(gestureModifier)
+            .testTag("now_playing_visual_stage")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(end = if (settings.gesturesEnabled && settings.verticalVolumeGestureEnabled) 24.dp else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                if (settings.cinematicLyricsEnabled && isLyricsOverlayVisible) {
+                    CinematicLyricsOverlay(
+                        song = song,
+                        currentPositionMs = currentPositionMs,
+                        durationMs = durationMs,
+                        isPlaying = isPlaying,
+                        settings = settings,
+                        viewModel = viewModel,
+                        onOpenFullLyrics = onOpenFullLyrics,
+                        onImportLrc = onImportLrc,
+                        onSeekTo = onSeekTo,
+                        onToggleOverlay = onToggleLyricsOverlay
+                    )
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (settings.playerStyle == PlayerScreenStyle.MINIMAL) {
+                            MinimalTrackFormatBadge(song = song)
+                        }
+                        if (settings.cinematicLyricsEnabled) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color(0xFF06101D).copy(alpha = 0.72f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .clickable { onToggleLyricsOverlay() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Lyrics, null, tint = accentPrimary, modifier = Modifier.size(16.dp))
+                                    Text("Show Credits Lyrics", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (effectiveVisualizerMode != VisualizerMode.OFF) {
+                AudioVisualizerDisplay(
+                    bars = visualizerBars,
+                    mode = effectiveVisualizerMode,
+                    accentPrimary = accentPrimary,
+                    accentSecondary = accentSecondary
+                )
+            }
+        }
+
+        // Dedicated right-edge vertical volume drag zone so center lyrics scrolling never conflicts
+        if (settings.gesturesEnabled && settings.verticalVolumeGestureEnabled) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(26.dp)
+                    .fillMaxHeight()
+                    .pointerInput(Unit) {
+                        var currentRatio = latestVolumeRatio
+                        detectVerticalDragGestures(
+                            onDragStart = { currentRatio = latestVolumeRatio },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                val delta = -dragAmount / size.height.toFloat().coerceAtLeast(200f)
+                                currentRatio = (currentRatio + delta).coerceIn(0f, 1f)
+                                latestOnVolumeChange(currentRatio)
+                            }
+                        )
+                    }
+                    .testTag("vertical_volume_gesture_zone")
+            )
+        }
+
+        AnimatedVisibility(
+            visible = gestureFeedbackText != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.Center)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0xFF06101D).copy(alpha = 0.88f),
+                border = BorderStroke(1.dp, accentPrimary.copy(alpha = 0.65f))
+            ) {
+                Text(
+                    text = gestureFeedbackText ?: "",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun NowPlayingTopBar(
     sleepTimerState: SleepTimerState,
     stopAfterCurrentTrack: Boolean,
+    stopAfterCurrentPlaylist: Boolean,
     primaryColor: Color,
     accentPrimary: Color,
     onCollapse: () -> Unit,
@@ -620,6 +933,12 @@ private fun NowPlayingTopBar(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.tertiary
                 )
+            } else if (stopAfterCurrentPlaylist) {
+                Text(
+                    text = "Stops after playlist",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
             }
         }
 
@@ -635,7 +954,9 @@ private fun NowPlayingTopBar(
                 Icon(
                     imageVector = Icons.Rounded.Bedtime,
                     contentDescription = "Sleep Timer",
-                    tint = if (sleepTimerState.active) accentPrimary else primaryColor
+                    tint = if (sleepTimerState.active || stopAfterCurrentTrack || stopAfterCurrentPlaylist) {
+                        accentPrimary
+                    } else primaryColor
                 )
             }
             IconButton(
@@ -657,6 +978,7 @@ private fun NowPlayingControlsSection(
     song: Song,
     playbackState: PlaybackState,
     volumeState: DeviceVolumeState,
+    waveformBars: List<Float>,
     settings: AppSettings,
     sliderValue: Float,
     currentPosition: Long,
@@ -674,6 +996,7 @@ private fun NowPlayingControlsSection(
     onOpenLyrics: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenEqualizer: () -> Unit,
+    onCycleVisualizer: () -> Unit,
     onToggleSpeedMenu: (Boolean) -> Unit,
     onSelectSpeed: (Float) -> Unit,
     onToggleStopAfter: () -> Unit,
@@ -779,6 +1102,13 @@ private fun NowPlayingControlsSection(
                 }
             }
             AssistChip(
+                onClick = onCycleVisualizer,
+                label = { Text(settings.visualizerMode.label, color = primaryColor) },
+                leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, Modifier.size(16.dp), tint = accentPrimary) },
+                colors = AssistChipDefaults.assistChipColors(containerColor = chipContainerColor),
+                border = BorderStroke(1.dp, chipBorderColor)
+            )
+            AssistChip(
                 onClick = onToggleStopAfter,
                 label = { Text("Stop After", color = primaryColor) },
                 leadingIcon = { Icon(Icons.Rounded.StopCircle, null, Modifier.size(16.dp), tint = accentPrimary) },
@@ -792,21 +1122,32 @@ private fun NowPlayingControlsSection(
         }
     }
 
-    // Progress Slider & Timestamps
+    // Waveform Seekbar or Classic Progress Slider & Timestamps
     Column(modifier = Modifier.fillMaxWidth()) {
-        Slider(
-            value = sliderValue,
-            onValueChange = onSliderChange,
-            onValueChangeFinished = onSliderChangeFinished,
-            colors = SliderDefaults.colors(
-                thumbColor = accentPrimary,
-                activeTrackColor = accentPrimary,
-                inactiveTrackColor = Color.White.copy(alpha = 0.28f)
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("track_progress_slider")
-        )
+        if (settings.waveformSeekbarEnabled) {
+            WaveformSeekbar(
+                bars = waveformBars,
+                progress = sliderValue,
+                onValueChange = onSliderChange,
+                onValueChangeFinished = onSliderChangeFinished,
+                activeColor = accentPrimary,
+                inactiveColor = Color.White.copy(alpha = 0.28f)
+            )
+        } else {
+            Slider(
+                value = sliderValue,
+                onValueChange = onSliderChange,
+                onValueChangeFinished = onSliderChangeFinished,
+                colors = SliderDefaults.colors(
+                    thumbColor = accentPrimary,
+                    activeTrackColor = accentPrimary,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.28f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("track_progress_slider")
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -1091,6 +1432,10 @@ private fun MinimalTrackFormatBadge(song: Song) {
 @Composable
 private fun SleepTimerDialog(
     sleepTimerState: SleepTimerState,
+    stopAfterCurrentTrack: Boolean,
+    stopAfterCurrentPlaylist: Boolean,
+    onToggleStopAfterTrack: () -> Unit,
+    onToggleStopAfterPlaylist: () -> Unit,
     onStartTimer: (minutes: Int, fadeOut: Boolean) -> Unit,
     onCancelTimer: () -> Unit,
     onDismiss: () -> Unit
@@ -1118,6 +1463,22 @@ private fun SleepTimerDialog(
                     Switch(checked = fadeOut, onCheckedChange = { fadeOut = it })
                 }
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Stop after current track")
+                    Switch(checked = stopAfterCurrentTrack, onCheckedChange = { onToggleStopAfterTrack() })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.stop_after_playlist))
+                    Switch(checked = stopAfterCurrentPlaylist, onCheckedChange = { onToggleStopAfterPlaylist() })
+                }
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
@@ -1142,6 +1503,37 @@ private fun SleepTimerDialog(
             if (sleepTimerState.active) {
                 TextButton(onClick = onDismiss) { Text("Keep Running") }
             }
+        }
+    )
+}
+
+@Composable
+private fun SaveQueueAsPlaylistDialog(
+    defaultName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(defaultName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.save_queue_as_playlist), fontWeight = FontWeight.Bold) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.playlist_name_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name) },
+                enabled = name.isNotBlank()
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
